@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Tour Guide - Voice & Text Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <h1><i class="fas fa-compass"></i> AI Tour Guide</h1>
+                <div class="header-controls">
+                    <div class="connection-status" id="connection-status">
+                        <i class="fas fa-wifi"></i> Online
+                    </div>
+                    <button class="settings-btn" id="settings-btn">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="user-profile">
+                    <div class="avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <h3>Traveler</h3>
+                </div>
+
+                <div class="preferences-section">
+                    <h4>Your Preferences</h4>
+                    <div class="preference-tags" id="preference-tags">
+                        <span class="tag">Sightseeing</span>
+                        <span class="tag">Medium Budget</span>
+                    </div>
+                    <button class="edit-preferences-btn" id="edit-preferences">
+                        <i class="fas fa-edit"></i> Edit Preferences
+                    </button>
+                </div>
+
+                <div class="destination-selector">
+                    <h4>Current Destination</h4>
+                    <select id="destination-select">
+                        <option value="">Select Destination</option>
+                        {% for key, dest in destinations.items() %}
+                        <option value="{{ key }}">{{ dest.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="navigation-widget">
+                    <h4>Navigation</h4>
+                    <div class="gps-info">
+                        <div id="current-location">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Getting location...</span>
+                        </div>
+                        <div id="distance-info">
+                            <i class="fas fa-road"></i>
+                            <span>- km to destination</span>
+                        </div>
+                    </div>
+                    <button class="nav-btn" id="start-navigation">
+                        <i class="fas fa-directions"></i> Start Navigation
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Chat Area -->
+            <section class="chat-area">
+                <div class="chat-header">
+                    <div class="chat-info">
+                        <h2>Tour Guide Chat</h2>
+                        <div class="language-selector">
+                            <select id="language-select">
+                                <option value="en">English</option>
+                                <option value="es">Español</option>
+                                <option value="fr">Français</option>
+                                <option value="ja">日本語</option>
+                                <option value="zh">中文</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="voice-controls">
+                        <button class="voice-btn" id="voice-toggle">
+                            <i class="fas fa-microphone"></i>
+                            <span>Voice Mode</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message bot-message">
+                        <div class="message-avatar">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="message-content">
+                            <strong>AI Guide:</strong> Hello! I'm your AI tour guide. I can help you with directions, recommendations, and local information. How can I assist you today?
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-area">
+                    <div class="input-container">
+                        <input type="text" id="message-input" 
+                               placeholder="Ask about attractions, directions, or local tips...">
+                        <div class="input-buttons">
+                            <button class="send-btn" id="send-btn">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                            <button class="voice-input-btn" id="voice-input-btn">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="quick-actions">
+                        <button class="quick-action" data-action="attractions">
+                            <i class="fas fa-landmark"></i> Top Attractions
+                        </button>
+                        <button class="quick-action" data-action="food">
+                            <i class="fas fa-utensils"></i> Local Food
+                        </button>
+                        <button class="quick-action" data-action="transport">
+                            <i class="fas fa-subway"></i> Transportation
+                        </button>
+                        <button class="quick-action" data-action="emergency">
+                            <i class="fas fa-phone-alt"></i> Emergency Info
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Preferences Modal -->
+    <div class="modal" id="preferences-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Travel Preferences</h3>
+                <button class="close-btn" id="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="preference-group">
+                    <label>Interests:</label>
+                    <div class="interest-tags">
+                        <button class="interest-tag" data-interest="sightseeing">Sightseeing</button>
+                        <button class="interest-tag" data-interest="food">Food & Dining</button>
+                        <button class="interest-tag" data-interest="adventure">Adventure</button>
+                        <button class="interest-tag" data-interest="culture">Culture</button>
+                        <button class="interest-tag" data-interest="shopping">Shopping</button>
+                        <button class="interest-tag" data-interest="nature">Nature</button>
+                    </div>
+                </div>
+                <div class="preference-group">
+                    <label>Budget:</label>
+                    <select id="budget-select">
+                        <option value="low">Budget</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">Luxury</option>
+                    </select>
+                </div>
+                <div class="preference-group">
+                    <label>Travel Style:</label>
+                    <select id="travel-style-select">
+                        <option value="sightseeing">Sightseeing</option>
+                        <option value="adventure">Adventure</option>
+                        <option value="relaxation">Relaxation</option>
+                        <option value="cultural">Cultural</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="save-btn" id="save-preferences">Save Preferences</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/gps.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/voice.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
