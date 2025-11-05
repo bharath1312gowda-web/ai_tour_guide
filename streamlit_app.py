@@ -7,6 +7,7 @@ import streamlit as st
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
+from gtts import gTTS
 
 try:
     from openai import OpenAI
@@ -32,8 +33,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(MAPS_DIR, exist_ok=True)
 
-st.set_page_config(page_title="AI Tour Guide — Updated", layout="wide")
-st.title("AI Tour Guide — Updated")
+st.set_page_config(page_title="AI Tour Guide — Text + Voice", layout="wide")
+st.title("AI Tour Guide — Text suggestions + Voice (TTS)")
 
 def is_online(timeout=2.0):
     try:
@@ -58,6 +59,8 @@ def save_offline_db(db):
     with open(OFFLINE_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=2, ensure_ascii=False)
 
+offline_db = load_offline_db()
+
 def get_openai_client():
     if not OPENAI_API_KEY or OpenAI is None:
         return None
@@ -66,23 +69,21 @@ def get_openai_client():
     except Exception:
         return None
 
-def fetch_openai_suggestions_plain(city, category, model="gpt-3.5-turbo"):
+def fetch_openai_text(prompt, model="gpt-3.5-turbo"):
     client = get_openai_client()
     if client is None:
         return None
-    prompt = f"Provide 3 concise {category} suggestions for {city} as bullet points (one suggestion per line)."
     try:
-        resp = client.chat.completions.create(model=model, messages=[{"role":"user","content":prompt}], temperature=0.7, max_tokens=400)
-        # streaming vs non-streaming safe access
-        text = ""
+        messages = [{"role":"user","content":prompt}]
+        resp = client.chat.completions.create(model=model, messages=messages, temperature=0.7, max_tokens=500)
+        # handle different response shapes
         try:
-            text = resp.choices[0].message.content
+            return resp.choices[0].message.content
         except Exception:
             try:
-                text = resp.choices[0].text
+                return resp.choices[0].text
             except Exception:
-                text = str(resp)
-        return text
+                return str(resp)
     except Exception:
         return None
 
@@ -90,11 +91,7 @@ def fetch_unsplash_image_urls(query, count=3):
     if not UNSPLASH_ACCESS_KEY:
         return []
     try:
-        r = requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={"query": query, "per_page": count, "orientation": "landscape", "client_id": UNSPLASH_ACCESS_KEY},
-            timeout=8,
-        )
+        r = requests.get("https://api.unsplash.com/search/photos", params={"query": query, "per_page": count, "orientation":"landscape", "client_id": UNSPLASH_ACCESS_KEY}, timeout=8)
         r.raise_for_status()
         data = r.json().get("results", [])[:count]
         return [d["urls"]["regular"] for d in data if "urls" in d]
@@ -121,12 +118,7 @@ def save_uploaded_image(file, dest_path):
 
 def geocode_city(city):
     try:
-        r = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": city, "format": "json", "limit": 1},
-            headers={"User-Agent": "ai-tour-guide-app"},
-            timeout=8,
-        )
+        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": city, "format": "json", "limit": 1}, headers={"User-Agent":"ai-tour-guide-app"}, timeout=8)
         r.raise_for_status()
         data = r.json()
         if data:
@@ -159,9 +151,9 @@ def fetch_tile_image(lat, lon, zoom=12, w=800, h=400):
                         timg = Image.open(BytesIO(r.content)).convert("RGB")
                         canvas.paste(timg, (rx * tile_size, ry * tile_size))
                     else:
-                        canvas.paste(Image.new("RGB", (tile_size, tile_size), (240, 240, 240)), (rx * tile_size, ry * tile_size))
+                        canvas.paste(Image.new("RGB", (tile_size, tile_size), (240,240,240)), (rx * tile_size, ry * tile_size))
                 except Exception:
-                    canvas.paste(Image.new("RGB", (tile_size, tile_size), (240, 240, 240)), (rx * tile_size, ry * tile_size))
+                    canvas.paste(Image.new("RGB", (tile_size, tile_size), (240,240,240)), (rx * tile_size, ry * tile_size))
         cx = (canvas.width - w) // 2
         cy = (canvas.height - h) // 2
         return canvas.crop((cx, cy, cx + w, cy + h))
@@ -169,14 +161,15 @@ def fetch_tile_image(lat, lon, zoom=12, w=800, h=400):
         return None
 
 def generate_placeholder_map(city, lat, lon, w=800, h=400):
-    img = Image.new("RGB", (w, h), (230, 230, 230))
+    img = Image.new("RGB", (w, h), (230,230,230))
     draw = ImageDraw.Draw(img)
     try:
+        from PIL import ImageFont
         font = ImageFont.truetype("DejaVuSans.ttf", 24)
     except Exception:
         font = None
     text = f"{city}\n{lat:.6f}, {lon:.6f}"
-    draw.multiline_text((20, 20), text, fill=(40, 40, 40), font=font)
+    draw.multiline_text((20,20), text, fill=(40,40,40), font=font)
     return img
 
 def fetch_and_save_map(lat, lon, dest_path, zoom=12, w=800, h=400):
@@ -186,12 +179,11 @@ def fetch_and_save_map(lat, lon, dest_path, zoom=12, w=800, h=400):
         return True
     return False
 
-def store_city_offline(city, category, suggestions, lat=None, lon=None, image_urls=None, uploaded_paths=None):
-    db = offline_db
+def store_city_offline(city, category, suggestions_text, lat=None, lon=None, image_urls=None, uploaded_paths=None):
     key = safe_filename(city)
-    entry = db.get(key, {"city": city, "categories": {}, "images": [], "map_image": None, "lat": lat, "lon": lon})
+    entry = offline_db.get(key, {"city": city, "categories": {}, "images": [], "map_image": None, "lat": lat, "lon": lon})
     cats = entry.get("categories", {})
-    cats[category.lower()] = suggestions
+    cats[category.lower()] = [{"name":"suggestions","description": suggestions_text, "tip": ""}]
     entry["categories"] = cats
     entry["lat"] = lat or entry.get("lat")
     entry["lon"] = lon or entry.get("lon")
@@ -212,12 +204,23 @@ def store_city_offline(city, category, suggestions, lat=None, lon=None, image_ur
             placeholder = generate_placeholder_map(entry["city"], entry["lat"], entry["lon"])
             placeholder.save(map_fname, format="PNG")
             entry["map_image"] = map_fname
-    db[key] = entry
-    save_offline_db(db)
+    offline_db[key] = entry
+    save_offline_db(offline_db)
     return key
 
-offline_db = load_offline_db()
+def tts_play(text, lang_code="en"):
+    try:
+        if not text or len(text.strip())==0:
+            return
+        t = gTTS(text=text, lang=lang_code)
+        tmp = os.path.join(DATA_DIR, f"tts_{int(time.time())}.mp3")
+        t.save(tmp)
+        audio_bytes = open(tmp, "rb").read()
+        st.audio(audio_bytes)
+    except Exception as e:
+        st.error("TTS error: " + str(e))
 
+# UI: network & mode
 online = is_online()
 st.sidebar.markdown(f"*Network:* {'Online' if online else 'Offline'}")
 mode = st.sidebar.radio("Mode", ["Auto", "Force Online", "Force Offline"])
@@ -226,10 +229,11 @@ if mode == "Force Online":
 elif mode == "Force Offline":
     online = False
 
+# Sidebar controls
 st.sidebar.header("Search / Download")
 city_input = st.sidebar.text_input("City (e.g., Mysore, Mangalore)", value="")
 category = st.sidebar.selectbox("Category", ["Places", "Food", "Culture", "Hotels"])
-uploaded_files = st.sidebar.file_uploader("Upload images for this city (optional)", accept_multiple_files=True, type=["jpg", "jpeg", "png"])
+uploaded_files = st.sidebar.file_uploader("Upload images for this city (optional)", accept_multiple_files=True, type=["jpg","jpeg","png"])
 uploaded_saved_paths = []
 if uploaded_files:
     for f in uploaded_files:
@@ -246,15 +250,18 @@ if st.sidebar.button("Download for offline (save city)"):
         st.sidebar.error("Enter a city name first.")
     else:
         lat, lon = geocode_city(query_city)
-        suggestions_to_store = [{"name": f"{category} 1", "description": f"Popular {category.lower()} spot in {query_city}.", "tip": ""}]
+        suggestions_text = None
         if OPENAI_API_KEY and online:
-            ai_text = fetch_openai_suggestions_plain(query_city, category)
-            if ai_text:
-                suggestions_to_store = [{"name": "AI suggestions", "description": ai_text, "tip": ""}]
+            prompt = f"Provide 3 concise {category} suggestions for {query_city} as short bullet points."
+            suggestions_text = fetch_openai_text(prompt)
+        if not suggestions_text:
+            suggestions_text = f"{category} suggestions for {query_city}: 1) Popular spot 2) Another spot 3) Hidden gem."
         image_urls = fetch_unsplash_image_urls(query_city, count=3) if UNSPLASH_ACCESS_KEY else []
-        key = store_city_offline(query_city, category, suggestions_to_store, lat=lat, lon=lon, image_urls=image_urls, uploaded_paths=uploaded_saved_paths)
+        key = store_city_offline(query_city, category, suggestions_text, lat=lat, lon=lon, image_urls=image_urls, uploaded_paths=uploaded_saved_paths)
         st.sidebar.success(f"Saved {query_city} as {key}")
-        offline_db = load_offline_db()
+        # reload offline_db from disk
+        global_offline = load_offline_db()
+        offline_db.update(global_offline)
 
 st.sidebar.markdown("---")
 st.sidebar.header("Manage stored cities")
@@ -280,116 +287,176 @@ for key in list(offline_db.keys()):
         save_offline_db(offline_db)
         st.experimental_rerun()
 
-col1, col2 = st.columns([2, 1])
+# Main layout
+col1, col2 = st.columns([2,1])
 with col1:
     st.header("Explore")
-    if not city_input:
-        st.info("Enter a city in the sidebar and choose a mode.")
-    else:
-        city = city_input.strip()
-        st.subheader(f"{city.title()} — {category}")
-        if not online:
-            key = safe_filename(city)
+    # Browser speech capture HTML (populates query param 'speech')
+    st.components.v1.html(
+        """
+        <div style="margin-bottom:8px;">
+          <button id="btnSpeak">🎤 Use Speech (populate input)</button>
+          <script>
+            const btn = document.getElementById('btnSpeak');
+            btn.onclick = () => {
+              const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+              recognition.lang = 'en-IN';
+              recognition.onresult = (e) => {
+                const t = e.results[0][0].transcript;
+                const url = new URL(window.location);
+                url.searchParams.set('speech', t);
+                window.location = url.toString();
+              };
+              recognition.start();
+            }
+          </script>
+        </div>
+        """,
+        height=60,
+    )
+
+    params = st.experimental_get_query_params()
+    speech_text = params.get("speech", [""])[0]
+    user_input = st.text_input("Ask about this destination (or use speech):", value=speech_text)
+    lang_choice = st.selectbox("TTS language", ["en","hi","kn"], index=0, format_func=lambda x: {"en":"English","hi":"Hindi","kn":"Kannada"}[x])
+    model_choice = st.selectbox("Model (OpenAI)", ["gpt-3.5-turbo","gpt-4"], index=0)
+    if st.button("Get Suggestions") or user_input:
+        query_city = city_input.strip() or "Bengaluru"
+        # 1) Try OpenAI if online and key present
+        suggestions_text = None
+        if online and OPENAI_API_KEY:
+            prompt = f"You are a helpful travel guide. For the city {query_city}, give 3 short suggestions for category: {category}. Also include one-line description for each, separated by newlines."
+            try:
+                suggestions_text = fetch_openai_text(prompt, model=model_choice)
+            except Exception as e:
+                suggestions_text = None
+        # 2) Fallback to offline DB if available
+        if not suggestions_text:
+            key = safe_filename(query_city)
             if key in offline_db:
                 entry = offline_db[key]
-                items = entry.get("categories", {}).get(category.lower(), [])
-                if items:
-                    for it in items:
-                        st.markdown(f"{it.get('name')}**  \n{it.get('description')}  \n*Tip:* {it.get('tip','-')}")
+                cats = entry.get("categories", {})
+                cat_data = cats.get(category.lower())
+                if cat_data and isinstance(cat_data, list):
+                    # join descriptions
+                    parts = []
+                    for it in cat_data:
+                        name = it.get("name", "")
+                        desc = it.get("description", "")
+                        parts.append(f"• {name}: {desc}")
+                    suggestions_text = "\n".join(parts)
                 else:
-                    st.warning("No stored items for this category in offline data.")
-                imgs = entry.get("images", [])
-                if imgs:
-                    st.markdown("### Images (offline)")
-                    cols = st.columns(min(3, len(imgs)))
-                    for i, p in enumerate(imgs):
-                        try:
-                            img = Image.open(p)
-                            with cols[i % len(cols)]:
-                                st.image(img, use_container_width=True)
-                        except Exception:
-                            st.write("Could not open image", p)
-                map_img = entry.get("map_image")
-                if map_img and os.path.exists(map_img):
-                    st.markdown("### Map (offline)")
-                    st.image(map_img, use_container_width=True)
-                else:
-                    st.info("No offline map stored for this city.")
+                    suggestions_text = f"{category} suggestions for {query_city}: 1) Popular spot 2) Another spot 3) Hidden gem."
             else:
-                st.error("City not available offline. Use online mode to download it for offline use.")
-        else:
-            lat, lon = geocode_city(city)
-            if lat and lon:
-                st.write(f"Location: {lat:.6f}, {lon:.6f}")
-            else:
-                st.info("Could not geocode the city automatically.")
-            suggestions_text = None
-            if OPENAI_API_KEY and online:
-                suggestions_text = fetch_openai_suggestions_plain(city, category)
-                if suggestions_text:
-                    st.markdown("### AI Suggestions")
-                    st.write(suggestions_text)
-            if not suggestions_text:
-                st.markdown("### Example suggestions (fallback)")
-                st.write(f"{category} suggestions for {city.title()} will appear here once you fetch online or download the city for offline use.")
-            image_urls = fetch_unsplash_image_urls(city, count=3)
-            images_displayed = False
-            if image_urls:
-                st.markdown("### Images (online)")
-                cols = st.columns(min(3, len(image_urls)))
-                for i, url in enumerate(image_urls):
+                suggestions_text = f"{category} suggestions for {query_city}: 1) Popular spot 2) Another spot 3) Hidden gem."
+        # 3) Display text
+        st.markdown("### Suggestions")
+        st.write(suggestions_text)
+        # 4) Play TTS
+        # Map language codes: gTTS supports 'en','hi','kn' (kn may have limited quality)
+        try:
+            tts_play(suggestions_text, lang_code=lang_choice)
+        except Exception as e:
+            st.error("TTS failed: " + str(e))
+
+    st.markdown("---")
+    st.markdown("### Destination details & images")
+    query_city = city_input.strip() or "Bengaluru"
+    if not is_online():
+        key = safe_filename(query_city)
+        if key in offline_db:
+            entry = offline_db[key]
+            st.subheader(f"{entry.get('city')}")
+            cats = entry.get("categories", {})
+            items = cats.get(category.lower(), [])
+            if items:
+                for it in items:
+                    st.markdown(f"{it.get('name','')}**  \n{it.get('description','')}")
+            imgs = entry.get("images", [])
+            if imgs:
+                st.markdown("Images (offline)")
+                cols = st.columns(min(3,len(imgs)))
+                for i,p in enumerate(imgs):
                     try:
-                        r = requests.get(url, timeout=8)
-                        r.raise_for_status()
-                        img = Image.open(BytesIO(r.content))
-                        with cols[i % len(cols)]:
+                        img = Image.open(p)
+                        with cols[i%len(cols)]:
+                            st.image(img, use_container_width=True)
+                    except Exception:
+                        pass
+            map_img = entry.get("map_image")
+            if map_img and os.path.exists(map_img):
+                st.markdown("Map (offline)")
+                st.image(map_img, use_container_width=True)
+            else:
+                st.info("No offline map stored.")
+        else:
+            st.info("No offline data for this city. Use Download for offline in sidebar.")
+    else:
+        lat, lon = geocode_city(query_city)
+        if lat and lon:
+            st.write(f"Location: {lat:.6f}, {lon:.6f}")
+        else:
+            st.info("Could not geocode automatically.")
+        # show online Unsplash images + local if present
+        image_urls = fetch_unsplash_image_urls(query_city, count=3)
+        images_displayed = False
+        if image_urls:
+            st.markdown("Images (online)")
+            cols = st.columns(min(3,len(image_urls)))
+            for i, url in enumerate(image_urls):
+                try:
+                    r = requests.get(url, timeout=8)
+                    r.raise_for_status()
+                    img = Image.open(BytesIO(r.content))
+                    with cols[i%len(cols)]:
+                        st.image(img, use_container_width=True)
+                    images_displayed = True
+                except Exception:
+                    continue
+        local_key = safe_filename(query_city)
+        if local_key in offline_db:
+            local_imgs = offline_db[local_key].get("images", [])
+            if local_imgs:
+                st.markdown("Images (local/offline)")
+                cols = st.columns(min(3,len(local_imgs)))
+                for i,p in enumerate(local_imgs):
+                    try:
+                        img = Image.open(p)
+                        with cols[i%len(cols)]:
                             st.image(img, use_container_width=True)
                         images_displayed = True
-                    except Exception:
+                    except:
                         continue
-            local_key = safe_filename(city)
-            if local_key in offline_db:
-                local_imgs = offline_db[local_key].get("images", [])
-                if local_imgs:
-                    st.markdown("### Images (local/offline)")
-                    cols = st.columns(min(3, len(local_imgs)))
-                    for i, p in enumerate(local_imgs):
-                        try:
-                            img = Image.open(p)
-                            with cols[i % len(cols)]:
-                                st.image(img, use_container_width=True)
-                            images_displayed = True
-                        except:
-                            continue
-            if not images_displayed:
-                st.info("No images available for this city.")
-            if lat and lon:
-                st.markdown("### Map (live)")
-                if FOLIUM_OK:
-                    try:
-                        m = folium.Map(location=[lat, lon], zoom_start=12, tiles="CartoDB Positron", attr="© OpenStreetMap contributors | CartoDB")
-                        folium.Marker([lat, lon], tooltip=city.title()).add_to(m)
-                        st_folium(m, width=700, height=400)
-                    except Exception:
-                        img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
-                        if img:
-                            st.image(img, use_container_width=True)
-                        else:
-                            st.image(generate_placeholder_map(city, lat, lon), use_container_width=True)
-                else:
+        if not images_displayed:
+            st.info("No images available for this city.")
+        if lat and lon:
+            st.markdown("Map (live)")
+            if FOLIUM_OK:
+                try:
+                    m = folium.Map(location=[lat, lon], zoom_start=12, tiles="CartoDB Positron", attr="© OpenStreetMap contributors | CartoDB")
+                    folium.Marker([lat, lon], tooltip=query_city.title()).add_to(m)
+                    st_folium(m, width=700, height=400)
+                except Exception:
                     img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
                     if img:
                         st.image(img, use_container_width=True)
                     else:
-                        st.image(generate_placeholder_map(city, lat, lon), use_container_width=True)
+                        st.image(generate_placeholder_map(query_city, lat, lon), use_container_width=True)
+            else:
+                img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
+                if img:
+                    st.image(img, use_container_width=True)
+                else:
+                    st.image(generate_placeholder_map(query_city, lat, lon), use_container_width=True)
 
 with col2:
     st.header("Quick actions")
+    st.write("Use sidebar to search/manage/save offline.")
     if offline_db:
         st.write("Offline cities stored:")
-        for k, v in offline_db.items():
-            st.write(f"- *{v.get('city', k).title()}*")
+        for k,v in offline_db.items():
+            st.write(f"- *{v.get('city',k).title()}*")
     else:
         st.write("No cities stored offline yet.")
 st.markdown("---")
-st.caption("AI Tour Guide — images included (uploaded, Unsplash, or local).")
+st.caption("AI Tour Guide — now shows text suggestions and plays TTS (gTTS).")
