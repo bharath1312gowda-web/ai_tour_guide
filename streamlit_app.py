@@ -1,8 +1,4 @@
-import os
-import json
-import time
-import requests
-import streamlit as st
+import os, json, time, requests, streamlit as st
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
@@ -140,18 +136,17 @@ def geocode_city(city):
 
 def fetch_tile_image(lat, lon, zoom=12, w=800, h=400):
     try:
-        n = 2 ** zoom
         import math
+        n = 2 ** zoom
         xtile = int((lon + 180.0) / 360.0 * n)
         lat_rad = math.radians(lat)
         ytile = int((1.0 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
-        tiles = []
         tile_size = 256
         cols = math.ceil(w / tile_size) + 1
         rows = math.ceil(h / tile_size) + 1
         start_x = xtile - cols // 2
         start_y = ytile - rows // 2
-        base_url = "https://tile.openstreetmap.org"
+        base_url = "https://cartodb-basemaps-a.global.ssl.fastly.net/light_all"
         canvas = Image.new("RGB", (cols * tile_size, rows * tile_size))
         for rx in range(cols):
             for ry in range(rows):
@@ -225,7 +220,7 @@ def store_city_offline(city, category, suggestions, lat=None, lon=None, image_ur
 
 st.set_page_config(page_title="AI Tour Guide (Interactive Map)", layout="wide")
 st.title("AI Tour Guide — Interactive Map")
-st.write("Online uses Folium if available; otherwise falls back to tile-based images or a placeholder.")
+st.write("Online uses Folium with CartoDB tiles; otherwise falls back to tile-based images or a placeholder.")
 online = is_online()
 st.sidebar.markdown(f"*Network:* {'Online' if online else 'Offline'}")
 mode = st.sidebar.radio("Mode", ["Auto (use network)", "Force Online", "Force Offline"])
@@ -246,7 +241,6 @@ st.sidebar.markdown("---")
 st.sidebar.header("Manage stored cities")
 for key in list(offline_db.keys()):
     entry = offline_db[key]
-    name = entry.get("city", key)
     if st.sidebar.button(f"Download JSON: {key}"):
         st.sidebar.download_button(f"Download {key}.json", json.dumps(entry, indent=2, ensure_ascii=False), file_name=f"{key}.json", mime="application/json")
     if st.sidebar.button(f"Remove: {key}"):
@@ -361,8 +355,8 @@ with col1:
                 st.markdown("### Map (live)")
                 if FOLIUM_OK:
                     try:
-                        m = folium.Map(location=[lat, lon], zoom_start=12)
-                        folium.Marker([lat, lon]).add_to(m)
+                        m = folium.Map(location=[lat, lon], zoom_start=12, tiles="CartoDB Positron", attr="© OpenStreetMap contributors | CartoDB")
+                        folium.Marker([lat, lon], tooltip=city.title()).add_to(m)
                         st_folium(m, width=700, height=400)
                     except Exception:
                         img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
