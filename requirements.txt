@@ -1,5 +1,6 @@
 streamlit
 openai>=1.12.0
 python-dotenv
-protobuf<=3.20.3
-httpx==0.27.0
+requests
+folium
+streamlit-folium
