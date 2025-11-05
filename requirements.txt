@@ -4,4 +4,4 @@ python-dotenv
 requests
 folium
 Pillow
-streamlit-folium
+folium
