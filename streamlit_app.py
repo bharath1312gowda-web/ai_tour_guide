@@ -4,7 +4,7 @@ import time
 import requests
 import streamlit as st
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
 try:
     from openai import OpenAI
@@ -20,7 +20,6 @@ except Exception:
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
-
 DATA_DIR = "data"
 IMAGES_DIR = os.path.join("static", "images")
 MAPS_DIR = os.path.join("static", "maps")
@@ -139,40 +138,60 @@ def geocode_city(city):
         return None, None
     return None, None
 
-def fetch_static_map_bytes_osm(lat, lon, zoom=12, w=800, h=400):
+def fetch_tile_image(lat, lon, zoom=12, w=800, h=400):
     try:
-        map_url = f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
-        r = requests.get(map_url, timeout=10)
-        if r.status_code == 200:
-            return r.content
-        else:
-            return None
+        n = 2 ** zoom
+        import math
+        xtile = int((lon + 180.0) / 360.0 * n)
+        lat_rad = math.radians(lat)
+        ytile = int((1.0 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
+        tiles = []
+        tile_size = 256
+        cols = math.ceil(w / tile_size) + 1
+        rows = math.ceil(h / tile_size) + 1
+        start_x = xtile - cols // 2
+        start_y = ytile - rows // 2
+        base_url = "https://tile.openstreetmap.org"
+        canvas = Image.new("RGB", (cols * tile_size, rows * tile_size))
+        for rx in range(cols):
+            for ry in range(rows):
+                tx = start_x + rx
+                ty = start_y + ry
+                url = f"{base_url}/{zoom}/{tx}/{ty}.png"
+                try:
+                    r = requests.get(url, timeout=6)
+                    if r.status_code == 200:
+                        img = Image.open(BytesIO(r.content)).convert("RGB")
+                        canvas.paste(img, (rx * tile_size, ry * tile_size))
+                    else:
+                        blank = Image.new("RGB", (tile_size, tile_size), (240, 240, 240))
+                        canvas.paste(blank, (rx * tile_size, ry * tile_size))
+                except Exception:
+                    blank = Image.new("RGB", (tile_size, tile_size), (240, 240, 240))
+                    canvas.paste(blank, (rx * tile_size, ry * tile_size))
+        cx = (canvas.width - w) // 2
+        cy = (canvas.height - h) // 2
+        cropped = canvas.crop((cx, cy, cx + w, cy + h))
+        return cropped
     except Exception:
         return None
 
-def fetch_static_map_bytes_maptile(lat, lon, zoom=12, w=800, h=400):
+def generate_placeholder_map(city, lat, lon, w=800, h=400):
+    img = Image.new("RGB", (w, h), (230, 230, 230))
+    draw = ImageDraw.Draw(img)
     try:
-        tile_url = f"https://api.maptiler.com/maps/basic/static/{lon},{lat},{zoom}/{w}x{h}.png?key=GET_YOUR_OWN_MAPTILER_KEY"
-        r = requests.get(tile_url, timeout=10)
-        if r.status_code == 200:
-            return r.content
-        else:
-            return None
+        font = ImageFont.truetype("DejaVuSans.ttf", 28)
     except Exception:
-        return None
-
-def fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400):
-    b = fetch_static_map_bytes_osm(lat, lon, zoom=zoom, w=w, h=h)
-    if b:
-        return b
-    b = fetch_static_map_bytes_maptile(lat, lon, zoom=zoom, w=w, h=h)
-    return b
+        font = ImageFont.load_default()
+    text = f"{city}\n{lat:.6f}, {lon:.6f}"
+    tw, th = draw.multiline_textsize(text, font=font)
+    draw.multiline_text(((w - tw) / 2, (h - th) / 2), text, fill=(40, 40, 40), font=font, align="center")
+    return img
 
 def fetch_and_save_map(lat, lon, dest_path, zoom=12, w=800, h=400):
-    b = fetch_static_map_bytes(lat, lon, zoom=zoom, w=w, h=h)
-    if b:
-        with open(dest_path, "wb") as f:
-            f.write(b)
+    bimg = fetch_tile_image(lat, lon, zoom=zoom, w=w, h=h)
+    if bimg:
+        bimg.save(dest_path, format="PNG")
         return True
     return False
 
@@ -196,13 +215,17 @@ def store_city_offline(city, category, suggestions, lat=None, lon=None, image_ur
         ok = fetch_and_save_map(entry["lat"], entry["lon"], map_fname)
         if ok:
             entry["map_image"] = map_fname
+        else:
+            placeholder = generate_placeholder_map(entry["city"], entry["lat"], entry["lon"])
+            placeholder.save(map_fname, format="PNG")
+            entry["map_image"] = map_fname
     offline_db[key] = entry
     save_offline_db(offline_db)
     return key
 
-st.set_page_config(page_title="AI Tour Guide (Online+Offline)", layout="wide")
-st.title("AI Tour Guide — Online & Offline")
-st.write("Runs online when available. Use 'Download for offline' to save a city.")
+st.set_page_config(page_title="AI Tour Guide (Interactive Map)", layout="wide")
+st.title("AI Tour Guide — Interactive Map")
+st.write("Online uses Folium if available; otherwise falls back to tile-based images or a placeholder.")
 online = is_online()
 st.sidebar.markdown(f"*Network:* {'Online' if online else 'Offline'}")
 mode = st.sidebar.radio("Mode", ["Auto (use network)", "Force Online", "Force Offline"])
@@ -342,23 +365,25 @@ with col1:
                         folium.Marker([lat, lon]).add_to(m)
                         st_folium(m, width=700, height=400)
                     except Exception:
-                        map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
-                        if map_bytes:
+                        img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
+                        if img:
                             try:
-                                st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
-                            except Exception:
+                                st.image(img, use_container_width=True)
+                            except:
                                 st.write("Map fetched but couldn't be displayed as image.")
                         else:
-                            st.info("Could not display map via folium or static fetch.")
+                            placeholder = generate_placeholder_map(city, lat, lon)
+                            st.image(placeholder, use_container_width=True)
                 else:
-                    map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
-                    if map_bytes:
+                    img = fetch_tile_image(lat, lon, zoom=12, w=800, h=400)
+                    if img:
                         try:
-                            st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
-                        except Exception:
+                            st.image(img, use_container_width=True)
+                        except:
                             st.write("Map fetched but couldn't be displayed as image.")
                     else:
-                        st.info("Could not fetch live static map at this time. See Manage → logs for details.")
+                        placeholder = generate_placeholder_map(city, lat, lon)
+                        st.image(placeholder, use_container_width=True)
             if btn_download:
                 st.info("Preparing to download and save city for offline use...")
                 if isinstance(suggestions, list) and suggestions:
@@ -385,4 +410,4 @@ with col2:
         st.write("No cities stored offline yet.")
 
 st.markdown("---")
-st.caption("AI Tour Guide — online + offline storage enabled.")
+st.caption("AI Tour Guide — interactive map enabled.")
