@@ -10,6 +10,12 @@ try:
     from openai import OpenAI
 except Exception:
     OpenAI = None
+try:
+    import folium
+    from streamlit_folium import st_folium
+    FOLIUM_OK = True
+except Exception:
+    FOLIUM_OK = False
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -133,14 +139,34 @@ def geocode_city(city):
         return None, None
     return None, None
 
-def fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400):
+def fetch_static_map_bytes_osm(lat, lon, zoom=12, w=800, h=400):
     try:
         map_url = f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom={zoom}&size={w}x{h}&markers={lat},{lon},red-pushpin"
         r = requests.get(map_url, timeout=10)
-        r.raise_for_status()
-        return r.content
+        if r.status_code == 200:
+            return r.content
+        else:
+            return None
     except Exception:
         return None
+
+def fetch_static_map_bytes_maptile(lat, lon, zoom=12, w=800, h=400):
+    try:
+        tile_url = f"https://api.maptiler.com/maps/basic/static/{lon},{lat},{zoom}/{w}x{h}.png?key=GET_YOUR_OWN_MAPTILER_KEY"
+        r = requests.get(tile_url, timeout=10)
+        if r.status_code == 200:
+            return r.content
+        else:
+            return None
+    except Exception:
+        return None
+
+def fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400):
+    b = fetch_static_map_bytes_osm(lat, lon, zoom=zoom, w=w, h=h)
+    if b:
+        return b
+    b = fetch_static_map_bytes_maptile(lat, lon, zoom=zoom, w=w, h=h)
+    return b
 
 def fetch_and_save_map(lat, lon, dest_path, zoom=12, w=800, h=400):
     b = fetch_static_map_bytes(lat, lon, zoom=zoom, w=w, h=h)
@@ -310,14 +336,29 @@ with col1:
                 st.info("Unsplash key not configured. Images will be placeholders or offline files.")
             if lat and lon:
                 st.markdown("### Map (live)")
-                map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
-                if map_bytes:
+                if FOLIUM_OK:
                     try:
-                        st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
+                        m = folium.Map(location=[lat, lon], zoom_start=12)
+                        folium.Marker([lat, lon]).add_to(m)
+                        st_folium(m, width=700, height=400)
                     except Exception:
-                        st.write("Map fetched but couldn't be displayed as image.")
+                        map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
+                        if map_bytes:
+                            try:
+                                st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
+                            except Exception:
+                                st.write("Map fetched but couldn't be displayed as image.")
+                        else:
+                            st.info("Could not display map via folium or static fetch.")
                 else:
-                    st.info("Could not fetch live static map at this time.")
+                    map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
+                    if map_bytes:
+                        try:
+                            st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
+                        except Exception:
+                            st.write("Map fetched but couldn't be displayed as image.")
+                    else:
+                        st.info("Could not fetch live static map at this time. See Manage → logs for details.")
             if btn_download:
                 st.info("Preparing to download and save city for offline use...")
                 if isinstance(suggestions, list) and suggestions:
