@@ -1,7 +1,10 @@
 streamlit
-openai>=1.12.0
-python-dotenv
-requests
+openai
 folium
+streamlit-folium
 Pillow
-folium
+requests
+pyttsx3
+SpeechRecognition
+googletrans==4.0.0rc1
+python-dotenv
