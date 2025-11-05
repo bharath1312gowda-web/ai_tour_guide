@@ -2,6 +2,8 @@ import streamlit as st
 from openai import OpenAI
 import json
 import os
+import random
+from datetime import datetime
 
 # Page configuration
 st.set_page_config(
@@ -21,215 +23,262 @@ def load_offline_data():
 
 offline_data = load_offline_data()
 
-def get_offline_response(prompt, destination, language):
-    """Get offline response based on user query"""
-    prompt_lower = prompt.lower()
-    
-    # If no specific destination is provided, use generic response
-    if not destination:
-        return get_generic_offline_response(language)
-    
-    # Check if it's one of our predefined destinations
-    if destination in offline_data['destinations']:
-        dest_info = offline_data['destinations'][destination]
-        
-        # Match query type and provide relevant offline info
-        if any(word in prompt_lower for word in ['attraction', 'place', 'see', 'visit', 'tour']):
-            return get_attractions_response(dest_info, language)
-        elif any(word in prompt_lower for word in ['food', 'restaurant', 'eat', 'cuisine', 'meal']):
-            return get_food_response(dest_info, language)
-        elif any(word in prompt_lower for word in ['transport', 'get around', 'travel', 'bus', 'train', 'metro']):
-            return get_transport_response(dest_info, language)
-        elif any(word in prompt_lower for word in ['emergency', 'help', 'police', 'hospital', 'doctor']):
-            return get_emergency_response(dest_info, language)
-        elif any(word in prompt_lower for word in ['hotel', 'stay', 'accommodation', 'sleep']):
-            return get_accommodation_response(dest_info, language)
-        else:
-            return get_general_info_response(dest_info, language)
-    else:
-        # For custom cities, provide general travel advice
-        return get_custom_city_response(destination, prompt_lower, language)
+# Tour Guide Personalities
+TOUR_GUIDES = {
+    "adventure": {
+        "name": "Adventure Guide Alex",
+        "style": "enthusiastic and adventurous",
+        "icon": "🏔️",
+        "description": "Loves outdoor activities, hiking, and thrilling experiences"
+    },
+    "cultural": {
+        "name": "Cultural Guide Clara", 
+        "style": "knowledgeable and sophisticated",
+        "icon": "🎭",
+        "description": "Expert in history, art, and local traditions"
+    },
+    "foodie": {
+        "name": "Foodie Guide Frank",
+        "style": "passionate and detailed", 
+        "icon": "🍜",
+        "description": "Food expert who knows all the best local eateries"
+    },
+    "family": {
+        "name": "Family Guide Fiona",
+        "style": "friendly and practical",
+        "icon": "👨‍👩‍👧‍👦", 
+        "description": "Great with kids and family-friendly activities"
+    },
+    "luxury": {
+        "name": "Luxury Guide Leo",
+        "style": "elegant and exclusive",
+        "icon": "⭐",
+        "description": "Focuses on premium experiences and luxury travel"
+    }
+}
 
-def get_custom_city_response(city_name, prompt, language):
-    """Provide responses for custom cities entered by users"""
-    prompt_lower = prompt.lower()
+def get_tour_guide_suggestions(city, guide_type, language, user_interests=[]):
+    """Get proactive tour guide suggestions based on city and guide personality"""
     
-    responses = {
-        "en": {
-            "attractions": f"**{city_name.title()} - Top Attractions**\n\nFor {city_name}, I recommend:\n• Researching popular landmarks and museums\n• Checking local tourism websites\n• Visiting historical sites\n• Exploring natural attractions\n\n💡 **Tip**: Use online travel guides or ask locals for the best places to visit!",
-            "food": f"**{city_name.title()} - Local Food**\n\nIn {city_name}, you should try:\n• Local specialty dishes\n• Traditional restaurants\n• Street food markets\n• Regional cuisine\n\n💡 **Tip**: Ask locals for restaurant recommendations for authentic experiences!",
-            "transport": f"**{city_name.title()} - Transportation**\n\nGetting around {city_name}:\n• Public transportation (buses, trains)\n• Taxis or ride-sharing services\n• Walking in city centers\n• Bike rentals if available\n\n💡 **Tip**: Check local transportation apps for routes and schedules!",
-            "emergency": f"**{city_name.title()} - Emergency Information**\n\nGeneral emergency contacts:\n• Police: 112 (EU) or 911 (US/CA)\n• Ambulance: 112 (EU) or 911 (US/CA)\n• Fire: 112 (EU) or 911 (US/CA)\n\n🚨 **Important**: Learn local emergency numbers for {city_name}!",
-            "general": f"**{city_name.title()} - Travel Guide**\n\nWelcome to {city_name}! As a popular travel destination, here are some general tips:\n• Research local customs and culture\n• Learn basic phrases in the local language\n• Check weather conditions before your trip\n• Be aware of local laws and regulations\n\n💡 For specific information about {city_name}, I recommend checking official tourism websites or travel guides."
+    suggestions = {
+        "adventure": {
+            "en": [
+                f"🌄 **Adventure Alert!** For thrill-seekers in {city}, I recommend starting with the mountain trails at sunrise - the views are absolutely breathtaking!",
+                f"🚵 **Ready for action?** Let's explore {city}'s outdoor adventures! How about we start with the famous hiking routes?",
+                f"🏞️ **Nature calls!** I know the perfect hidden waterfalls and scenic spots around {city} that most tourists miss!",
+                f"⛰️ **Adventure time!** The best way to experience {city} is through its outdoor activities. Let me plan an exciting day for you!"
+            ],
+            "es": [
+                f"🌄 **¡Alerta de aventura!** Para los buscadores de emociones en {city}, recomiendo comenzar con los senderos de montaña al amanecer - ¡las vistas son absolutamente impresionantes!",
+                f"🚵 **¿Listo para la acción?** ¡Exploremos las aventuras al aire libre de {city}! ¿Qué tal si comenzamos con las rutas de senderismo famosas?",
+            ],
+            "fr": [
+                f"🌄 **Alerte aventure !** Pour les amateurs de sensations fortes à {city}, je recommande de commencer par les sentiers de montagne au lever du soleil - les vues sont absolument à couper le souffle !",
+                f"🚵 **Prêt pour l'action ?** Explorons les aventures en plein air de {city} ! Et si nous commencions par les célèbres routes de randonnée ?",
+            ]
         },
-        "es": {
-            "attractions": f"**{city_name.title()} - Principales Atracciones**\n\nPara {city_name}, recomiendo:\n• Investigar monumentos y museos populares\n• Consultar sitios web de turismo local\n• Visitar sitios históricos\n• Explorar atracciones naturales\n\n💡 **Consejo**: ¡Usa guías de viaje en línea o pregunta a los locales por los mejores lugares para visitar!",
-            "food": f"**{city_name.title()} - Comida Local**\n\nEn {city_name}, deberías probar:\n• Platos especialidades locales\n• Restaurantes tradicionales\n• Mercados de comida callejera\n• Cocina regional\n\n💡 **Consejo**: ¡Pregunta a los locales por recomendaciones de restaurantes para experiencias auténticas!",
-            "transport": f"**{city_name.title()} - Transporte**\n\nMoverse por {city_name}:\n• Transporte público (autobuses, trenes)\n• Taxis o servicios de ride-sharing\n• Caminar en centros urbanos\n• Alquiler de bicicletas si está disponible\n\n💡 **Consejo**: ¡Consulta aplicaciones de transporte local para rutas y horarios!",
-            "emergency": f"**{city_name.title()} - Información de Emergencia**\n\nContactos de emergencia generales:\n• Policía: 112 (UE) o 911 (EEUU/CA)\n• Ambulancia: 112 (UE) o 911 (EEUU/CA)\n• Bomberos: 112 (UE) o 911 (EEUU/CA)\n\n🚨 **Importante**: ¡Aprende los números de emergencia locales para {city_name}!",
-            "general": f"**{city_name.title()} - Guía de Viaje**\n\n¡Bienvenido a {city_name}! Como destino turístico popular, aquí hay algunos consejos generales:\n• Investiga costumbres y cultura local\n• Aprende frases básicas en el idioma local\n• Verifica las condiciones climáticas antes de tu viaje\n• Ten en cuenta las leyes y regulaciones locales\n\n💡 Para información específica sobre {city_name}, recomiendo consultar sitios web de turismo oficiales o guías de viaje."
+        "cultural": {
+            "en": [
+                f"🏛️ **Cultural immersion!** {city} is rich with history! Let me take you through the ancient ruins and museums that tell incredible stories.",
+                f"🎨 **Art lover's paradise!** The galleries and historical sites in {city} are magnificent. Shall we start with the most iconic museum?",
+                f"📜 **Step back in time!** The historical district of {city} holds secrets from centuries past. I'd love to be your guide through these ancient streets!",
+                f"🕌 **Cultural treasure!** Let me show you the architectural marvels and cultural landmarks that make {city} so special!"
+            ],
+            "es": [
+                f"🏛️ **¡Inmersión cultural!** {city} es rica en historia! Permíteme llevarte a través de las ruinas antiguas y museos que cuentan historias increíbles.",
+                f"🎨 **¡Paraíso para amantes del arte!** Las galerías y sitios históricos en {city} son magníficos. ¿Empezamos con el museo más icónico?",
+            ]
         },
-        "fr": {
-            "attractions": f"**{city_name.title()} - Principales Attractions**\n\nPour {city_name}, je recommande :\n• Rechercher les monuments et musées populaires\n• Consulter les sites Web touristiques locaux\n• Visiter les sites historiques\n• Explorer les attractions naturelles\n\n💡 **Astuce** : Utilisez des guides de voyage en ligne ou demandez aux habitants les meilleurs endroits à visiter !",
-            "food": f"**{city_name.title()} - Nourriture Locale**\n\nÀ {city_name}, vous devriez essayer :\n• Plats spécialités locales\n• Restaurants traditionnels\n• Marchés de rue\n• Cuisine régionale\n\n💡 **Astuce** : Demandez aux habitants des recommandations de restaurants pour des expériences authentiques !",
-            "transport": f"**{city_name.title()} - Transport**\n\nSe déplacer à {city_name} :\n• Transport public (bus, trains)\n• Taxis ou services de covoiturage\n• Marche dans les centres-villes\n• Location de vélos si disponible\n\n💡 **Astuce** : Consultez les applications de transport local pour les itinéraires et les horaires !",
-            "emergency": f"**{city_name.title()} - Informations d'Urgence**\n\nContacts d'urgence généraux :\n• Police : 112 (UE) ou 911 (États-Unis/Canada)\n• Ambulance : 112 (UE) ou 911 (États-Unis/Canada)\n• Pompiers : 112 (UE) ou 911 (États-Unis/Canada)\n\n🚨 **Important** : Apprenez les numéros d'urgence locaux pour {city_name} !",
-            "general": f"**{city_name.title()} - Guide de Voyage**\n\nBienvenue à {city_name} ! En tant que destination touristique populaire, voici quelques conseils généraux :\n• Recherchez les coutumes et la culture locales\n• Apprenez des phrases de base dans la langue locale\n• Vérifiez les conditions météorologiques avant votre voyage\n• Soyez conscient des lois et réglementations locales\n\n💡 Pour des informations spécifiques sur {city_name}, je recommande de consulter les sites Web touristiques officiels ou les guides de voyage."
+        "foodie": {
+            "en": [
+                f"🍜 **Food adventure!** The culinary scene in {city} is incredible! Let me take you to hidden local eateries that serve authentic flavors.",
+                f"🍽️ **Taste exploration!** I know all the best food streets and markets in {city}. Ready for a delicious journey through local cuisine?",
+                f"👨‍🍳 **Culinary secrets!** The real taste of {city} isn't in fancy restaurants - it's in the family-run spots I'll show you!",
+                f"🍛 **Flavor discovery!** Let me guide you through {city}'s food culture, from street food stalls to traditional restaurants!"
+            ],
+            "es": [
+                f"🍜 **¡Aventura culinaria!** La escena culinaria en {city} es increíble! Permíteme llevarte a comedores locales escondidos que sirven sabores auténticos.",
+                f"🍽️ **¡Exploración de sabores!** Conozco todas las mejores calles y mercados de comida en {city}. ¿Listo para un delicioso viaje por la cocina local?",
+            ]
         },
-        "ja": {
-            "attractions": f"**{city_name.title()} - 主なアトラクション**\n\n{city_name}については、以下をお勧めします：\n• 人気のランドマークや博物館を調査する\n• 現地の観光サイトを確認する\n• 史跡を訪れる\n• 自然のアトラクションを探索する\n\n💡 **ヒント**：オンライン旅行ガイドを利用するか、地元の人に最高の場所を聞いてみてください！",
-            "food": f"**{city_name.title()} - 地元の食べ物**\n\n{city_name}では、以下を試すべきです：\n• 地元の特産料理\n• 伝統的なレストラン\n• 屋台市場\n• 地域の料理\n\n💡 **ヒント**：本格的な体験のために、地元の人にレストランのおすすめを聞いてみてください！",
-            "transport": f"**{city_name.title()} - 交通手段**\n\n{city_name}の移動方法：\n• 公共交通機関（バス、電車）\n• タクシーまたはライドシェアサービス\n• 市街地の散歩\n• 利用可能な場合は自転車レンタル\n\n💡 **ヒント**：ルートとスケジュールについては、現地の交通アプリを確認してください！",
-            "emergency": f"**{city_name.title()} - 緊急情報**\n\n一般的な緊急連絡先：\n• 警察：112（EU）または911（米国/カナダ）\n• 救急車：112（EU）または911（米国/カナダ）\n• 消防：112（EU）または911（米国/カナダ）\n\n🚨 **重要**：{city_name}の現地の緊急番号を学んでください！",
-            "general": f"**{city_name.title()} - 旅行ガイド**\n\n{city_name}へようこそ！人気の旅行先として、以下は一般的なヒントです：\n• 現地の習慣と文化を調査する\n• 現地の言語で基本的なフレーズを学ぶ\n• 旅行前に天候条件を確認する\n• 現地の法律と規制に注意する\n\n💡 {city_name}に関する具体的な情報については、公式の観光サイトや旅行ガイドを確認することをお勧めします。"
+        "family": {
+            "en": [
+                f"👨‍👩‍👧‍👦 **Family fun!** {city} has amazing activities for all ages! Let me plan a day that both kids and adults will love.",
+                f"🎡 **Kid-friendly adventure!** I know all the best parks, interactive museums, and family attractions in {city}. Ready for some fun?",
+                f"🚂 **Family memories!** Let me show you the most enjoyable and educational spots in {city} that the whole family can enjoy together!",
+                f"🎪 **Fun for everyone!** From zoos to science centers, {city} has so much to offer families. Let's create unforgettable memories!"
+            ],
+            "es": [
+                f"👨‍👩‍👧‍👦 **¡Diversión familiar!** {city} tiene actividades increíbles para todas las edades! Permíteme planificar un día que tanto niños como adultos amarán.",
+                f"🎡 **¡Aventura para niños!** Conozco todos los mejores parques, museos interactivos y atracciones familiares en {city}. ¿Listo para divertirse?",
+            ]
         },
-        "zh": {
-            "attractions": f"**{city_name.title()} - 主要景点**\n\n对于{city_name}，我推荐：\n• 研究热门地标和博物馆\n• 查看当地旅游网站\n• 参观历史遗址\n• 探索自然景点\n\n💡 **提示**：使用在线旅行指南或询问当地人最佳游览地点！",
-            "food": f"**{city_name.title()} - 当地美食**\n\n在{city_name}，您应该尝试：\n• 当地特色菜肴\n• 传统餐厅\n• 街头小吃市场\n• 区域美食\n\n💡 **提示**：向当地人询问餐厅推荐以获得真实体验！",
-            "transport": f"**{city_name.title()} - 交通方式**\n\n在{city_name}出行：\n• 公共交通（巴士、火车）\n• 出租车或拼车服务\n• 在市中心步行\n• 如有可用则租用自行车\n\n💡 **提示**：查看当地交通应用程序了解路线和时间表！",
-            "emergency": f"**{city_name.title()} - 紧急信息**\n\n一般紧急联系人：\n• 警察：112（欧盟）或911（美国/加拿大）\n• 救护车：112（欧盟）或911（美国/加拿大）\n• 消防：112（欧盟）或911（美国/加拿大）\n\n🚨 **重要**：学习{city_name}的当地紧急号码！",
-            "general": f"**{city_name.title()} - 旅行指南**\n\n欢迎来到{city_name}！作为热门旅游目的地，以下是一些一般提示：\n• 研究当地风俗文化\n• 学习当地语言的基本短语\n• 旅行前查看天气状况\n• 注意当地法律法规\n\n💡 关于{city_name}的具体信息，我建议查看官方旅游网站或旅行指南。"
+        "luxury": {
+            "en": [
+                f"⭐ **Luxury experience!** {city} offers world-class premium experiences. Let me arrange exclusive access and VIP treatment for you.",
+                f"🏨 **Elegant exploration!** From five-star dining to private tours, I'll show you the most sophisticated side of {city}.",
+                f"💎 **Premium journey!** Experience {city} in style with luxury accommodations, fine dining, and exclusive cultural experiences.",
+                f"🛎️ **VIP treatment!** Let me curate a luxurious itinerary through {city}'s most exclusive venues and experiences."
+            ],
+            "es": [
+                f"⭐ **¡Experiencia de lujo!** {city} ofrece experiencias premium de clase mundial. Permíteme organizar acceso exclusivo y tratamiento VIP para ti.",
+                f"🏨 **¡Exploración elegante!** Desde cenas de cinco estrellas hasta tours privados, te mostraré el lado más sofisticado de {city}.",
+            ]
         }
     }
     
-    lang_responses = responses.get(language, responses["en"])
+    # Get suggestions for the selected language, fallback to English
+    lang_suggestions = suggestions.get(guide_type, {}).get(language, suggestions.get(guide_type, {}).get("en", []))
     
-    if any(word in prompt for word in ['attraction', 'place', 'see', 'visit', 'tour']):
-        return lang_responses["attractions"]
-    elif any(word in prompt for word in ['food', 'restaurant', 'eat', 'cuisine', 'meal']):
-        return lang_responses["food"]
-    elif any(word in prompt for word in ['transport', 'get around', 'travel', 'bus', 'train', 'metro']):
-        return lang_responses["transport"]
-    elif any(word in prompt for word in ['emergency', 'help', 'police', 'hospital', 'doctor']):
-        return lang_responses["emergency"]
+    if lang_suggestions:
+        return random.choice(lang_suggestions)
     else:
-        return lang_responses["general"]
+        return f"🌍 Welcome to {city}! I'm excited to be your tour guide and show you the best this amazing city has to offer!"
 
-def get_generic_offline_response(language):
-    """Generic response when no destination is selected"""
-    responses = {
-        "en": "🌍 **Welcome to AI Tour Guide!**\n\nPlease enter any city name in the sidebar to get travel information about:\n• Top attractions\n• Local food\n• Transportation\n• Emergency contacts\n• Travel tips\n\nYou can ask about any city worldwide!",
-        "es": "🌍 **¡Bienvenido a AI Tour Guide!**\n\nIngresa cualquier nombre de ciudad en la barra lateral para obtener información de viaje sobre:\n• Principales atracciones\n• Comida local\n• Transporte\n• Contactos de emergencia\n• Consejos de viaje\n\n¡Puedes preguntar sobre cualquier ciudad del mundo!",
-        "fr": "🌍 **Bienvenue dans AI Tour Guide !**\n\nEntrez n'importe quel nom de ville dans la barre latérale pour obtenir des informations de voyage sur :\n• Principales attractions\n• Nourriture locale\n• Transport\n• Contacts d'urgence\n• Conseils de voyage\n\nVous pouvez vous renseigner sur n'importe quelle ville dans le monde !",
-        "ja": "🌍 **AI Tour Guideへようこそ！**\n\nサイドバーに任意の都市名を入力して、以下の旅行情報を入手してください：\n• 主なアトラクション\n• 地元の食べ物\n• 交通手段\n• 緊急連絡先\n• 旅行のヒント\n\n世界中のどの都市についても質問できます！",
-        "zh": "🌍 **欢迎使用 AI Tour Guide！**\n\n在侧边栏输入任何城市名称以获取有关以下旅行信息：\n• 主要景点\n• 当地美食\n• 交通方式\n• 紧急联系人\n• 旅行提示\n\n您可以询问世界上的任何城市！"
-    }
-    return responses.get(language, responses["en"])
-
-def get_attractions_response(dest_info, language):
-    """Get attractions information for predefined cities"""
-    attractions = "\n".join([f"🏛️ {attr}" for attr in dest_info.get('attractions', [])])
-    tips = "\n".join([f"💡 {tip}" for tip in dest_info.get('tips', [])[:3]])
+def get_daily_itinerary(city, guide_type, days=1, language="en"):
+    """Generate a sample daily itinerary"""
     
-    responses = {
-        "en": f"**{dest_info['name']} - Top Attractions**\n\n{attractions}\n\n**Travel Tips:**\n{tips}",
-        "es": f"**{dest_info['name']} - Principales Atracciones**\n\n{attractions}\n\n**Consejos de Viaje:**\n{tips}",
-        "fr": f"**{dest_info['name']} - Principales Attractions**\n\n{attractions}\n\n**Conseils de Voyage:**\n{tips}",
-        "ja": f"**{dest_info['name']} - 主なアトラクション**\n\n{attractions}\n\n**旅行のヒント:**\n{tips}",
-        "zh": f"**{dest_info['name']} - 主要景点**\n\n{attractions}\n\n**旅行提示:**\n{tips}"
-    }
-    return responses.get(language, responses["en"])
+    itineraries = {
+        "adventure": {
+            "en": f"""
+**🌅 Adventure Itinerary for {city}**
 
-def get_food_response(dest_info, language):
-    """Get food information for predefined cities"""
-    food_items = "\n".join([f"🍽️ {dish}" for dish in dest_info.get('food', {}).get('popular_dishes', [])])
-    tips = dest_info.get('food', {}).get('dining_tips', [])
-    dining_tips = "\n".join([f"💡 {tip}" for tip in tips]) if tips else "• Try local restaurants for authentic experience"
-    
-    responses = {
-        "en": f"**{dest_info['name']} - Local Food**\n\n**Popular Dishes:**\n{food_items}\n\n**Dining Tips:**\n{dining_tips}",
-        "es": f"**{dest_info['name']} - Comida Local**\n\n**Platos Populares:**\n{food_items}\n\n**Consejos Gastronómicos:**\n{dining_tips}",
-        "fr": f"**{dest_info['name']} - Nourriture Locale**\n\n**Plats Populaires:**\n{food_items}\n\n**Conseils de Restaurant:**\n{dining_tips}",
-        "ja": f"**{dest_info['name']} - 地元の食べ物**\n\n**人気料理:**\n{food_items}\n\n**食事のヒント:**\n{dining_tips}",
-        "zh": f"**{dest_info['name']} - 当地美食**\n\n**热门菜肴:**\n{food_items}\n\n**用餐提示:**\n{dining_tips}"
-    }
-    return responses.get(language, responses["en"])
+**Morning (8 AM - 12 PM):**
+• Sunrise hike to scenic viewpoints
+• Explore nature trails and parks
+• Adventure photography session
 
-def get_transport_response(dest_info, language):
-    """Get transportation information for predefined cities"""
-    transport = dest_info.get('transportation', {})
-    transport_info = "\n".join([f"🚗 {key.replace('_', ' ').title()}: {value}" for key, value in transport.items()])
-    
-    responses = {
-        "en": f"**{dest_info['name']} - Transportation**\n\n{transport_info}",
-        "es": f"**{dest_info['name']} - Transporte**\n\n{transport_info}",
-        "fr": f"**{dest_info['name']} - Transport**\n\n{transport_info}",
-        "ja": f"**{dest_info['name']} - 交通手段**\n\n{transport_info}",
-        "zh": f"**{dest_info['name']} - 交通方式**\n\n{transport_info}"
-    }
-    return responses.get(language, responses["en"])
+**Afternoon (1 PM - 5 PM):**
+• Outdoor activity (kayaking/biking/hiking)
+• Local adventure sports experience
+• Picnic with local snacks
 
-def get_emergency_response(dest_info, language):
-    """Get emergency information for predefined cities"""
-    emergency = dest_info.get('emergency', {})
-    emergency_info = "\n".join([f"📞 {key.replace('_', ' ').title()}: **{value}**" for key, value in emergency.items()])
-    
-    responses = {
-        "en": f"**{dest_info['name']} - Emergency Contacts**\n\n{emergency_info}\n\n🚨 In case of emergency, stay calm and describe your location clearly.",
-        "es": f"**{dest_info['name']} - Contactos de Emergencia**\n\n{emergency_info}\n\n🚨 En caso de emergencia, mantén la calma y describe tu ubicación claramente.",
-        "fr": f"**{dest_info['name']} - Contacts d'Urgence**\n\n{emergency_info}\n\n🚨 En cas d'urgence, restez calme et décrivez clairement votre emplacement.",
-        "ja": f"**{dest_info['name']} - 緊急連絡先**\n\n{emergency_info}\n\n🚨 緊急時は落ち着いて、自分の場所を明確に説明してください。",
-        "zh": f"**{dest_info['name']} - 紧急联系人**\n\n{emergency_info}\n\n🚨 遇到紧急情况时，请保持冷静并清楚描述您的位置。"
-    }
-    return responses.get(language, responses["en"])
+**Evening (6 PM - 9 PM):**
+• Sunset at best viewing spot
+• Casual dinner at adventure-themed restaurant
+• Stargazing if weather permits
+""",
+            "es": f"""
+**🌅 Itinerario de Aventura para {city}**
 
-def get_accommodation_response(dest_info, language):
-    """Get accommodation information for predefined cities"""
-    tips = "\n".join([f"🏨 {tip}" for tip in dest_info.get('tips', []) if any(word in tip.lower() for word in ['hotel', 'stay', 'accommodation', 'sleep'])])
-    if not tips:
-        tips = "• Book in advance during peak season\n• Read recent reviews before booking\n• Consider location proximity to attractions"
-    
-    responses = {
-        "en": f"**{dest_info['name']} - Accommodation Tips**\n\n{tips}",
-        "es": f"**{dest_info['name']} - Consejos de Alojamiento**\n\n{tips}",
-        "fr": f"**{dest_info['name']} - Conseils d'Hébergement**\n\n{tips}",
-        "ja": f"**{dest_info['name']} - 宿泊のヒント**\n\n{tips}",
-        "zh": f"**{dest_info['name']} - 住宿提示**\n\n{tips}"
-    }
-    return responses.get(language, responses["en"])
+**Mañana (8 AM - 12 PM):**
+• Caminata al amanecer a miradores escénicos
+• Explorar senderos naturales y parques
+• Sesión de fotografía de aventura
 
-def get_general_info_response(dest_info, language):
-    """Get general destination information for predefined cities"""
-    basic_info = dest_info.get('basic_info', 'No additional information available.')
-    tips = "\n".join([f"💡 {tip}" for tip in dest_info.get('tips', [])[:3]])
-    
-    responses = {
-        "en": f"**{dest_info['name']}**\n\n{basic_info}\n\n**Quick Tips:**\n{tips}",
-        "es": f"**{dest_info['name']}**\n\n{basic_info}\n\n**Consejos Rápidos:**\n{tips}",
-        "fr": f"**{dest_info['name']}**\n\n{basic_info}\n\n**Conseils Rapides:**\n{tips}",
-        "ja": f"**{dest_info['name']}**\n\n{basic_info}\n\n**簡単なヒント:**\n{tips}",
-        "zh": f"**{dest_info['name']}**\n\n{basic_info}\n\n**快速提示:**\n{tips}"
+**Tarde (1 PM - 5 PM):**
+• Actividad al aire libre (kayak/ciclismo/senderismo)
+• Experiencia de deportes de aventura locales
+• Picnic con bocadillos locales
+
+**Noche (6 PM - 9 PM):**
+• Atardecer en el mejor lugar de observación
+• Cena casual en restaurante con tema de aventura
+• Observación de estrellas si el clima lo permite
+"""
+        },
+        "cultural": {
+            "en": f"""
+**🏛️ Cultural Itinerary for {city}**
+
+**Morning (9 AM - 12 PM):**
+• Guided tour of historical landmarks
+• Visit to main museums and galleries
+• Cultural heritage sites exploration
+
+**Afternoon (1 PM - 5 PM):**
+• Traditional architecture tour
+• Local artisan workshops visit
+• Cultural performance/show
+
+**Evening (6 PM - 9 PM):**
+• Fine dining with local cuisine
+• Night tour of illuminated monuments
+• Cultural district exploration
+"""
+        }
     }
-    return responses.get(language, responses["en"])
+    
+    return itineraries.get(guide_type, {}).get(language, "I'll create a personalized itinerary based on your interests!")
+
+def get_proactive_recommendations(city, context, language):
+    """Get proactive recommendations based on conversation context"""
+    
+    recommendations = {
+        "en": [
+            f"💡 **Pro Tip**: The best time to visit {city}'s main attractions is early morning to avoid crowds!",
+            f"🌟 **Hidden Gem**: Most tourists miss the local market in {city}'s old town - it's absolutely worth visiting!",
+            f"🚶 **Walking Route**: I recommend starting at the city center and exploring {city} on foot to discover hidden treasures!",
+            f"🍽️ **Local Secret**: Ask me about the family-run restaurant that serves the most authentic food in {city}!",
+            f"📸 **Photo Spot**: The best views of {city} are from the hilltop park - perfect for sunset photos!",
+            f"🎭 **Cultural Tip**: Check if there are any local festivals happening during your visit to {city}!",
+            f"🚇 **Transport Advice**: The local transit system in {city} is very efficient for getting around!",
+            f"🛍️ **Shopping Tip**: The artisan quarter in {city} has unique souvenirs you won't find elsewhere!"
+        ],
+        "es": [
+            f"💡 **Consejo Pro**: ¡La mejor hora para visitar las principales atracciones de {city} es temprano en la mañana para evitar multitudes!",
+            f"🌟 **Gema Oculta**: La mayoría de los turistas se pierden el mercado local en el casco antiguo de {city} - ¡vale absolutamente la pena visitarlo!",
+        ],
+        "fr": [
+            f"💡 **Conseil Pro**: Le meilleur moment pour visiter les principales attractions de {city} est tôt le matin pour éviter les foules!",
+            f"🌟 **Joyau Caché**: La plupart des touristes manquent le marché local dans la vieille ville de {city} - ça vaut vraiment le détour!",
+        ]
+    }
+    
+    lang_recs = recommendations.get(language, recommendations["en"])
+    return random.choice(lang_recs)
 
 # Initialize session state
 if 'messages' not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I'm your AI tour guide. How can I help you today?"}
+        {"role": "assistant", "content": "🌍 Hello! I'm your personal AI tour guide! Tell me which city you'd like to explore, and I'll create amazing experiences for you!"}
     ]
 if 'destination' not in st.session_state:
     st.session_state.destination = ''
 if 'language' not in st.session_state:
     st.session_state.language = 'en'
-if 'api_key_configured' not in st.session_state:
-    st.session_state.api_key_configured = False
+if 'guide_type' not in st.session_state:
+    st.session_state.guide_type = 'cultural'
+if 'user_interests' not in st.session_state:
+    st.session_state.user_interests = []
+if 'last_suggestion_time' not in st.session_state:
+    st.session_state.last_suggestion_time = None
 
 # Sidebar
 with st.sidebar:
     st.title("🌍 AI Tour Guide")
     
-    # City Input (User can enter ANY city)
-    st.subheader("🏙️ Enter Any City")
+    # Tour Guide Selection
+    st.subheader("👨‍🏫 Choose Your Guide")
+    guide_options = {
+        "cultural": "🎭 Cultural Guide",
+        "adventure": "🏔️ Adventure Guide", 
+        "foodie": "🍜 Foodie Guide",
+        "family": "👨‍👩‍👧‍👦 Family Guide",
+        "luxury": "⭐ Luxury Guide"
+    }
+    
+    selected_guide = st.selectbox("Guide Personality", 
+                                 options=list(guide_options.keys()),
+                                 format_func=lambda x: guide_options[x])
+    st.session_state.guide_type = selected_guide
+    
+    # Show guide description
+    guide_info = TOUR_GUIDES[selected_guide]
+    st.caption(f"**{guide_info['name']}** - {guide_info['description']}")
+    
+    # City Input
+    st.subheader("🏙️ Enter Your Destination")
     city_input = st.text_input("City Name", 
                               placeholder="e.g., Rome, Dubai, Bangkok, Sydney...",
                               help="Enter any city in the world!")
     
     if city_input:
         st.session_state.destination = city_input.lower().strip()
-        st.success(f"✅ City set to: {city_input.title()}")
+        st.success(f"✅ Exploring: {city_input.title()}")
     
-    # Quick City Suggestions
-    st.subheader("💡 Popular Cities")
+    # Quick City Buttons
+    st.subheader("💡 Popular Destinations")
     col1, col2 = st.columns(2)
     
     with col1:
@@ -237,12 +286,16 @@ with st.sidebar:
             st.session_state.destination = "paris"
         if st.button("Tokyo", use_container_width=True):
             st.session_state.destination = "tokyo"
+        if st.button("Dubai", use_container_width=True):
+            st.session_state.destination = "dubai"
     
     with col2:
         if st.button("New York", use_container_width=True):
             st.session_state.destination = "newyork"
         if st.button("London", use_container_width=True):
             st.session_state.destination = "london"
+        if st.button("Bangkok", use_container_width=True):
+            st.session_state.destination = "bangkok"
     
     # Language Selection
     st.subheader("🌐 Language")
@@ -257,47 +310,55 @@ with st.sidebar:
                            }[x])
     st.session_state.language = language
     
-    # Quick Actions
-    st.subheader("⚡ Quick Actions")
-    col1, col2 = st.columns(2)
+    # Quick Actions - Tour Guide Style
+    st.subheader("🎯 Quick Experiences")
     
-    with col1:
-        if st.button("🗺️ Attractions", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "What are the top attractions here?"})
-        if st.button("🍽️ Food", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "Recommend local food and restaurants"})
+    if st.button("🗺️ Get City Introduction", use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": "Tell me about this city and suggest must-see places"})
     
-    with col2:
-        if st.button("🚇 Transport", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "How to get around?"})
-        if st.button("🚨 Emergency", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "Emergency contacts and information"})
+    if st.button("🍽️ Food & Dining Guide", use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": "Recommend local food and restaurants"})
+    
+    if st.button("🏨 Daily Itinerary", use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": "Create a daily itinerary for me"})
+    
+    if st.button("💎 Hidden Gems", use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": "Show me places most tourists miss"})
 
-    # API Key Configuration (Hidden in expander)
-    with st.expander("🔧 Developer Settings"):
-        st.info("Configure API key for AI features")
-        openai_api_key = st.text_input("OpenAI API Key", type="password", 
-                                      help="Get your API key from https://platform.openai.com")
+    # API Key Configuration
+    with st.expander("🔧 AI Settings"):
+        st.info("Enable enhanced AI features")
+        openai_api_key = st.text_input("OpenAI API Key", type="password")
         if openai_api_key:
-            st.session_state.api_key_configured = True
             st.session_state.openai_api_key = openai_api_key
-            st.success("✅ API key configured!")
+            st.success("✅ AI Guide Enhanced!")
         else:
-            st.session_state.api_key_configured = False
             if hasattr(st.session_state, 'openai_api_key'):
                 del st.session_state.openai_api_key
-            st.warning("⚠️ AI features disabled without API key")
 
 # Main Chat Interface
 st.title("🌍 AI Tour Guide")
-st.markdown("Your intelligent travel companion for **any city worldwide**!")
+st.markdown("Your **personal tour guide** that proactively suggests amazing experiences!")
 
-# Display current city
-if st.session_state.destination:
-    current_city = st.session_state.destination.title()
-    st.info(f"🗺️ Currently exploring: **{current_city}**")
-else:
-    st.warning("🌍 Please enter a city name in the sidebar to get started!")
+# Display current guide and city
+col1, col2 = st.columns(2)
+with col1:
+    if st.session_state.destination:
+        current_city = st.session_state.destination.title()
+        st.info(f"🗺️ **Exploring:** {current_city}")
+with col2:
+    current_guide = TOUR_GUIDES[st.session_state.guide_type]
+    st.info(f"👨‍🏫 **Your Guide:** {current_guide['icon']} {current_guide['name']}")
+
+# Proactive suggestion button
+if st.session_state.destination and len(st.session_state.messages) < 3:
+    if st.button("🎯 Get Proactive Suggestions", type="primary"):
+        suggestion = get_tour_guide_suggestions(
+            st.session_state.destination.title(),
+            st.session_state.guide_type,
+            st.session_state.language
+        )
+        st.session_state.messages.append({"role": "assistant", "content": suggestion})
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -305,7 +366,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Chat input
-if prompt := st.chat_input("Ask about travel destinations, tips, or recommendations..."):
+if prompt := st.chat_input(f"Ask about {st.session_state.destination.title() if st.session_state.destination else 'your destination'}..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     
@@ -322,16 +383,56 @@ if prompt := st.chat_input("Ask about travel destinations, tips, or recommendati
         openai_api_key = st.session_state.get('openai_api_key', '')
         
         if not openai_api_key:
-            # Use offline mode
-            full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
+            # Use offline mode with tour guide personality
+            current_guide = TOUR_GUIDES[st.session_state.guide_type]
+            guide_intro = f"{current_guide['icon']} **{current_guide['name']}**: "
+            
+            # Add proactive suggestions randomly
+            if random.random() < 0.3:  # 30% chance to add proactive tip
+                proactive_tip = get_proactive_recommendations(
+                    st.session_state.destination.title(),
+                    prompt,
+                    st.session_state.language
+                )
+                full_response = guide_intro + " " + proactive_tip
+            else:
+                # Regular response with guide personality
+                basic_response = f"I'd love to show you around {st.session_state.destination.title()}! "
+                if "attraction" in prompt.lower() or "see" in prompt.lower() or "visit" in prompt.lower():
+                    full_response = guide_intro + basic_response + "Let me suggest some amazing places you shouldn't miss!"
+                elif "food" in prompt.lower() or "eat" in prompt.lower():
+                    full_response = guide_intro + basic_response + "The local cuisine here is fantastic! I know all the best spots."
+                elif "itinerary" in prompt.lower() or "plan" in prompt.lower():
+                    itinerary = get_daily_itinerary(
+                        st.session_state.destination.title(),
+                        st.session_state.guide_type,
+                        language=st.session_state.language
+                    )
+                    full_response = guide_intro + "\n\n" + itinerary
+                else:
+                    full_response = guide_intro + basic_response + "What would you like to know about this beautiful city?"
+            
             message_placeholder.markdown(full_response)
         else:
             try:
                 # Initialize OpenAI client
                 client = OpenAI(api_key=openai_api_key)
                 
-                # Prepare messages for OpenAI with city context
-                system_message = f"You are a friendly, knowledgeable tour guide. Respond in {st.session_state.language} language. The user is asking about {st.session_state.destination.title()}. Be helpful and provide practical travel advice."
+                # Prepare messages with tour guide personality
+                current_guide = TOUR_GUIDES[st.session_state.guide_type]
+                system_message = f"""You are {current_guide['name']}, a {current_guide['style']} tour guide. 
+                You are showing the user around {st.session_state.destination.title()}. 
+                Respond in {st.session_state.language} language.
+                
+                BE PROACTIVE AND SUGGESTIVE like a real tour guide:
+                - Suggest specific places, activities, and experiences
+                - Share local tips and hidden gems
+                - Create excitement and enthusiasm
+                - Offer personalized recommendations
+                - Use emojis and engaging language
+                - Ask follow-up questions about their interests
+                
+                Make the user feel like they have a personal guide showing them around!"""
                 
                 messages_for_api = [
                     {"role": "system", "content": system_message}
@@ -343,7 +444,7 @@ if prompt := st.chat_input("Ask about travel destinations, tips, or recommendati
                     messages=messages_for_api,
                     stream=True,
                     max_tokens=1000,
-                    temperature=0.7
+                    temperature=0.8
                 )
                 
                 # Stream the response
@@ -356,28 +457,30 @@ if prompt := st.chat_input("Ask about travel destinations, tips, or recommendati
                 
             except Exception as e:
                 # Fallback to offline response
-                full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
-                message_placeholder.markdown(full_response)
+                current_guide = TOUR_GUIDES[st.session_state.guide_type]
+                fallback = f"{current_guide['icon']} **{current_guide['name']}**: I'd love to show you the best of {st.session_state.destination.title()}! Let me suggest some amazing experiences..."
+                message_placeholder.markdown(fallback)
+                full_response = fallback
         
         # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-# Footer
+# Footer with tour guide features
 st.markdown("---")
-st.markdown("### 💡 How to Use")
+st.markdown("### 🎯 Your Personal Tour Guide Can:")
 st.markdown("""
-1. **Enter any city name** in the sidebar
-2. **Choose your preferred language**
-3. **Ask questions** about attractions, food, transport, etc.
-4. **Use quick actions** for common queries
-5. **Configure API key** for enhanced AI features
+- **🗺️ Proactively suggest** must-see attractions and hidden gems
+- **🍽️ Recommend restaurants** and local food experiences  
+- **🚶 Create personalized itineraries** based on your interests
+- **💎 Share local secrets** and insider tips
+- **📸 Suggest photo spots** and best times to visit
+- **🎭 Adapt to different travel styles** (adventure, luxury, family, etc.)
+- **🌍 Work with any city** worldwide
 """)
 
-st.markdown("### 🌟 Features")
-st.markdown("""
-- **Any city worldwide** - Not limited to predefined cities
-- **Multi-language support** - English, Spanish, French, Japanese, Chinese
-- **Quick actions** - One-click common questions
-- **Offline mode** - Works without API key
-- **AI-powered** - Enhanced responses with API key
-""")
+st.markdown("### 👨‍🏫 Meet Your Guides:")
+cols = st.columns(5)
+for i, (guide_type, guide_info) in enumerate(TOUR_GUIDES.items()):
+    with cols[i]:
+        st.markdown(f"**{guide_info['icon']} {guide_info['name']}**")
+        st.caption(guide_info['description'])
