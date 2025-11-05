@@ -1,5 +1,5 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 
 # =========================
 # PAGE CONFIG
@@ -11,10 +11,9 @@ st.set_page_config(
 )
 
 # =========================
-# OPENAI API KEY
+# OPENAI CLIENT SETUP
 # =========================
-# Make sure you set your API key in Streamlit Cloud secrets or replace below
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "your_api_key_here")
+client = OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", "your_api_key_here"))
 
 # =========================
 # HEADER SECTION
@@ -53,14 +52,17 @@ if st.button("✨ Generate Tour Plan"):
             """
 
             try:
-                response = openai.ChatCompletion.create(
+                response = client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=800,
-                    temperature=0.8
+                    messages=[
+                        {"role": "system", "content": "You are a helpful AI tour guide."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=800
                 )
 
-                guide_text = response["choices"][0]["message"]["content"]
+                guide_text = response.choices[0].message.content
                 st.markdown("### 🗺 Your AI Tour Plan")
                 st.markdown(guide_text)
 
