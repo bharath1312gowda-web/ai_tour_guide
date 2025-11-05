@@ -1,4 +1,3 @@
-# streamlit_app.py
 import os
 import json
 import time
@@ -7,16 +6,11 @@ import streamlit as st
 from io import BytesIO
 from PIL import Image
 from dotenv import load_dotenv
-
-# Optional OpenAI import (only used if online and key present)
 try:
     from openai import OpenAI
 except Exception:
     OpenAI = None
 
-# -----------------------
-# Config & paths
-# -----------------------
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -25,14 +19,20 @@ DATA_DIR = "data"
 IMAGES_DIR = os.path.join("static", "images")
 MAPS_DIR = os.path.join("static", "maps")
 OFFLINE_DATA_FILE = os.path.join(DATA_DIR, "offline_data.json")
-
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(MAPS_DIR, exist_ok=True)
 
-# -----------------------
-# Helpers: file DB load/save + cleanup
-# -----------------------
+def safe_rerun():
+    try:
+        st.experimental_rerun()
+    except Exception:
+        try:
+            st.experimental_set_query_params(_refresh=int(time.time()))
+        except Exception:
+            pass
+        st.markdown("<meta http-equiv='refresh' content='0'>", unsafe_allow_html=True)
+
 def save_offline_db(db):
     with open(OFFLINE_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, indent=2, ensure_ascii=False)
@@ -48,10 +48,6 @@ def load_offline_db():
         return {}
 
 def clean_offline_db(db):
-    """
-    Remove entries that look like non-city artifacts (e.g., top-level keys 'destinations', 'phrases', etc.)
-    Keep entries that have at least a 'city' string and 'categories' dict.
-    """
     clean = {}
     for k, v in db.items():
         try:
@@ -65,9 +61,6 @@ offline_db = load_offline_db()
 offline_db = clean_offline_db(offline_db)
 save_offline_db(offline_db)
 
-# -----------------------
-# Network / OpenAI helpers
-# -----------------------
 def is_online(timeout=2.0):
     try:
         requests.get("https://www.google.com", timeout=timeout)
@@ -90,23 +83,14 @@ def fetch_suggestions_openai(city, category, model="gpt-3.5-turbo"):
     client = get_openai_client()
     if client is None:
         raise RuntimeError("OpenAI client not configured or missing key.")
-    prompt = (
-        f"You are a travel guide. Provide 3 short {category.lower()} suggestions for {city}. "
-        "Return JSON array of objects with keys: name, description, tip."
-    )
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=500
-    )
+    prompt = f"You are a travel guide. Provide 3 short {category.lower()} suggestions for {city}. Return JSON array of objects with keys: name, description, tip."
+    resp = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}], temperature=0.7, max_tokens=500)
     txt = resp.choices[0].message.content
     try:
         parsed = json.loads(txt)
         if isinstance(parsed, list):
             return parsed
     except Exception:
-        # fallback: parse lines
         lines = [l.strip() for l in txt.splitlines() if l.strip()]
         items = []
         for i, line in enumerate(lines[:3]):
@@ -114,9 +98,6 @@ def fetch_suggestions_openai(city, category, model="gpt-3.5-turbo"):
         return items
     return []
 
-# -----------------------
-# Unsplash helpers
-# -----------------------
 def fetch_unsplash_image_urls(query, count=3):
     if not UNSPLASH_ACCESS_KEY:
         return []
@@ -141,9 +122,6 @@ def download_and_save_image(url, dest_path):
     except Exception:
         return False
 
-# -----------------------
-# Geocoding + static map
-# -----------------------
 def geocode_city(city):
     try:
         r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": city, "format": "json", "limit": 1}, headers={"User-Agent":"ai-tour-guide-app"}, timeout=8)
@@ -172,19 +150,14 @@ def fetch_and_save_map(lat, lon, dest_path, zoom=12, w=800, h=400):
         return True
     return False
 
-# -----------------------
-# Offline store logic
-# -----------------------
 def store_city_offline(city, category, suggestions, lat=None, lon=None, image_urls=None):
     key = safe_filename(city)
     entry = offline_db.get(key, {"city": city, "categories": {}, "images": [], "map_image": None, "lat": lat, "lon": lon})
-    # merge categories
     cats = entry.get("categories", {})
     cats[category.lower()] = suggestions
     entry["categories"] = cats
     entry["lat"] = lat or entry.get("lat")
     entry["lon"] = lon or entry.get("lon")
-    # download images
     if image_urls:
         for idx, url in enumerate(image_urls, start=1):
             fname = f"{key}{int(time.time())}{idx}.jpg"
@@ -192,7 +165,6 @@ def store_city_offline(city, category, suggestions, lat=None, lon=None, image_ur
             ok = download_and_save_image(url, dest)
             if ok:
                 entry.setdefault("images", []).append(dest)
-    # fetch & save map
     if entry.get("lat") and entry.get("lon"):
         map_fname = os.path.join(MAPS_DIR, f"{key}_map.png")
         ok = fetch_and_save_map(entry["lat"], entry["lon"], map_fname)
@@ -202,34 +174,25 @@ def store_city_offline(city, category, suggestions, lat=None, lon=None, image_ur
     save_offline_db(offline_db)
     return key
 
-# -----------------------
-# UI
-# -----------------------
 st.set_page_config(page_title="AI Tour Guide (Online+Offline)", layout="wide")
 st.title("AI Tour Guide — Online & Offline")
 st.write("Runs online when available. Use 'Download for offline' to save a city.")
-
 online = is_online()
 st.sidebar.markdown(f"*Network:* {'Online' if online else 'Offline'}")
-
 mode = st.sidebar.radio("Mode", ["Auto (use network)", "Force Online", "Force Offline"])
 if mode == "Force Online":
     online = True
 elif mode == "Force Offline":
     online = False
-
 st.sidebar.header("Search / Download")
 city_input = st.sidebar.text_input("City (e.g., Mysore, Mangalore)", value="")
 category = st.sidebar.selectbox("Category", ["Places", "Food", "Culture", "Hotels"])
 btn_search = st.sidebar.button("Search")
 btn_download = st.sidebar.button("Download for offline (save city)")
-
 st.sidebar.markdown("---")
 st.sidebar.write("Offline cities stored:")
 for k, v in offline_db.items():
     st.sidebar.write(f"- {v.get('city', k).title()}")
-
-# Management area
 st.sidebar.markdown("---")
 st.sidebar.header("Manage stored cities")
 for key in list(offline_db.keys()):
@@ -238,7 +201,6 @@ for key in list(offline_db.keys()):
     if st.sidebar.button(f"Download JSON: {key}"):
         st.sidebar.download_button(f"Download {key}.json", json.dumps(entry, indent=2, ensure_ascii=False), file_name=f"{key}.json", mime="application/json")
     if st.sidebar.button(f"Remove: {key}"):
-        # remove files
         for p in entry.get("images", []):
             try:
                 if os.path.exists(p): os.remove(p)
@@ -249,9 +211,8 @@ for key in list(offline_db.keys()):
             except: pass
         offline_db.pop(key, None)
         save_offline_db(offline_db)
-        st.experimental_rerun()
+        safe_rerun()
 
-# Main explore area
 col1, col2 = st.columns([2,1])
 with col1:
     st.header("Explore")
@@ -260,7 +221,6 @@ with col1:
     else:
         city = city_input.strip()
         st.subheader(f"{city.title()} — {category}")
-
         if not online:
             key = safe_filename(city)
             if key in offline_db:
@@ -295,13 +255,11 @@ with col1:
             else:
                 st.error("City not available offline. Use online mode to download it for offline use.")
         else:
-            # online flow
             lat, lon = geocode_city(city)
             if lat and lon:
                 st.write(f"Location: {lat:.6f}, {lon:.6f}")
             else:
                 st.info("Could not geocode the city automatically.")
-
             suggestions = None
             openai_error = None
             if OPENAI_API_KEY:
@@ -309,17 +267,14 @@ with col1:
                     with st.spinner("Fetching suggestions from OpenAI..."):
                         suggestions = fetch_suggestions_openai(city, category)
                 except Exception as e:
-                    # check for insufficient_quota in message
                     msg = str(e)
                     if "insufficient_quota" in msg or "quota" in msg.lower() or "429" in msg:
                         openai_error = "OpenAI quota exceeded or key restricted (429). Suggestions unavailable."
                     else:
                         openai_error = f"OpenAI error: {e}"
                     suggestions = None
-
             if openai_error:
                 st.error(openai_error)
-
             if suggestions:
                 st.markdown("### Suggestions")
                 if isinstance(suggestions, list):
@@ -333,8 +288,6 @@ with col1:
             else:
                 st.markdown("### Example suggestions (fallback)")
                 st.write(f"{category} suggestions for {city.title()} will appear here once you fetch online or download the city for offline use.")
-
-            # Unsplash images
             images_shown = []
             if UNSPLASH_ACCESS_KEY:
                 try:
@@ -355,8 +308,6 @@ with col1:
                     st.info("Could not fetch Unsplash images.")
             else:
                 st.info("Unsplash key not configured. Images will be placeholders or offline files.")
-
-            # Live static map (fetch bytes and display)
             if lat and lon:
                 st.markdown("### Map (live)")
                 map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
@@ -367,11 +318,8 @@ with col1:
                         st.write("Map fetched but couldn't be displayed as image.")
                 else:
                     st.info("Could not fetch live static map at this time.")
-
-            # download for offline
             if btn_download:
                 st.info("Preparing to download and save city for offline use...")
-                # suggestions to store
                 if isinstance(suggestions, list) and suggestions:
                     suggestions_to_store = suggestions
                 else:
@@ -383,7 +331,7 @@ with col1:
                 image_urls = fetch_unsplash_image_urls(city, count=3) if UNSPLASH_ACCESS_KEY else []
                 key = store_city_offline(city, category, suggestions_to_store, lat=lat, lon=lon, image_urls=image_urls)
                 st.success(f"Saved {city} to offline DB (key: {key})")
-                st.experimental_rerun()
+                safe_rerun()
 
 with col2:
     st.header("Quick actions")
