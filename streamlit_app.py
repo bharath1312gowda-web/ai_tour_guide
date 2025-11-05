@@ -280,14 +280,14 @@ with col1:
                         try:
                             img = Image.open(p)
                             with cols[i%len(cols)]:
-                                st.image(img, use_column_width=True)
+                                st.image(img, use_container_width=True)
                         except Exception:
                             st.write("Could not open image", p)
                 map_img = entry.get("map_image")
                 if map_img and os.path.exists(map_img):
                     st.markdown("### Map (offline)")
                     try:
-                        st.image(map_img, use_column_width=True)
+                        st.image(map_img, use_container_width=True)
                     except:
                         st.write("Saved map exists but couldn't be displayed.")
                 else:
@@ -347,7 +347,7 @@ with col1:
                                 r.raise_for_status()
                                 img = Image.open(BytesIO(r.content))
                                 with cols[i%3]:
-                                    st.image(img, use_column_width=True)
+                                    st.image(img, use_container_width=True)
                                 images_shown.append(u)
                             except Exception:
                                 continue
@@ -362,7 +362,7 @@ with col1:
                 map_bytes = fetch_static_map_bytes(lat, lon, zoom=12, w=800, h=400)
                 if map_bytes:
                     try:
-                        st.image(Image.open(BytesIO(map_bytes)), use_column_width=True)
+                        st.image(Image.open(BytesIO(map_bytes)), use_container_width=True)
                     except Exception:
                         st.write("Map fetched but couldn't be displayed as image.")
                 else:
