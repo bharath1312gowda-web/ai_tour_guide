@@ -1,111 +1,71 @@
-import os
 import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
+import os
 
-# -----------------------------
-# 🔹 Load local .env (for testing)
-# -----------------------------
+# Load environment variables from .env file
 load_dotenv()
 
-# -----------------------------
-# 🔹 Get API Key (works locally & on Streamlit Cloud)
-# -----------------------------
+# Page configuration
+st.set_page_config(page_title="AI Tour Guide", layout="wide")
+
+# Retrieve OpenAI API key (from Streamlit secrets or .env)
 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-if not api_key or api_key == "your_api_key_here":
-    st.error("❌ Missing OpenAI API key. Please add it to .streamlit/secrets.toml or .env")
+
+if not api_key or not api_key.startswith("sk-"):
+    st.error("⚠ Invalid or missing OpenAI API key. Please check your .env or .streamlit/secrets.toml file.")
     st.stop()
 
-# Initialize client
+# Initialize OpenAI client
 client = OpenAI(api_key=api_key)
 
-# -----------------------------
-# 🔹 Streamlit Page Config
-# -----------------------------
-st.set_page_config(page_title="AI Tour Guide 🌍", layout="centered")
+# Sidebar navigation
+st.sidebar.title("🧭 Navigation")
+page = st.sidebar.radio("Go to:", ["🏙 Personal Tour Guide", "👥 Meet Your Guides"])
 
-st.title("🌍 AI Tour Guide")
-st.caption("Your personal AI travel guide that proactively suggests amazing experiences!")
+# --- PAGE 1: Personal Tour Guide ---
+if page == "🏙 Personal Tour Guide":
+    st.title("🗺 Your Personal AI Tour Guide")
+    st.write("Discover destinations, get personalized suggestions, and plan your trips effortlessly.")
 
-# -----------------------------
-# 🔹 Sidebar for User Input
-# -----------------------------
-st.sidebar.header("🎯 Choose Your Guide")
-guide_type = st.sidebar.selectbox(
-    "Select Guide Type:",
-    ["Adventure Guide Alex", "Cultural Guide Clara", "Foodie Guide Frank", "Family Guide Fiona", "Luxury Guide Leo"]
-)
+    location = st.text_input("📍 Enter a place you'd like to explore:")
+    mood = st.selectbox("🎯 Choose your travel style:", ["Adventure", "Relaxation", "Culture", "Food", "Nature"])
 
-destination = st.sidebar.text_input("Enter Your Destination (e.g., Paris, Tokyo, Dubai, Bengaluru)")
-user_interest = st.sidebar.text_area("Tell us your interests (e.g., beaches, temples, nightlife, street food)")
+    if st.button("✨ Get Recommendations"):
+        if not location.strip():
+            st.warning("Please enter a location to continue.")
+        else:
+            with st.spinner("Finding your perfect spots..."):
+                try:
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "You are an AI travel guide who gives short, exciting travel suggestions."},
+                            {"role": "user", "content": f"Suggest 3 must-visit places and activities in {location} for a {mood} trip."}
+                        ],
+                    )
+                    tour_plan = response.choices[0].message.content
+                    st.success("Here’s your personalized travel plan:")
+                    st.write(tour_plan)
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
 
-# -----------------------------
-# 🔹 Information Section (separated)
-# -----------------------------
-st.markdown("### 🎒 Your Personal Tour Guide Can:")
-st.markdown("""
-- 🌍 *Proactively suggest* must-see attractions and hidden gems  
-- 🍴 *Recommend restaurants* and local food experiences  
-- 🗺 *Create personalized itineraries* based on your interests  
-- 📸 *Suggest photo spots* and best times to visit  
-- 🧭 *Adapt to travel styles* (adventure, luxury, family, etc.)  
-- 🌐 *Work with any city worldwide*
-""")
+# --- PAGE 2: Meet Your Guides ---
+elif page == "👥 Meet Your Guides":
+    st.title("👥 Meet Your Local Guides")
+    st.write("Here are your friendly tour companions who can help you explore!")
 
-st.markdown("---")
+    guides = [
+        {"name": "Ravi", "specialty": "Historical sites & temples", "location": "Mysuru"},
+        {"name": "Ananya", "specialty": "Food tours & markets", "location": "Bengaluru"},
+        {"name": "Kiran", "specialty": "Beaches & nature", "location": "Mangaluru"},
+    ]
 
-st.markdown("### 🧑‍🤝‍🧑 Meet Your Guides:")
-cols = st.columns(5)
-with cols[0]:
-    st.image("https://cdn-icons-png.flaticon.com/512/206/206864.png", width=50)
-    st.write("*Adventure Guide Alex* — Loves outdoor activities, hiking, and thrilling experiences.")
-with cols[1]:
-    st.image("https://cdn-icons-png.flaticon.com/512/4140/4140048.png", width=50)
-    st.write("*Cultural Guide Clara* — Expert in history, art, and local traditions.")
-with cols[2]:
-    st.image("https://cdn-icons-png.flaticon.com/512/2922/2922561.png", width=50)
-    st.write("*Foodie Guide Frank* — Food expert who knows all the best local eateries.")
-with cols[3]:
-    st.image("https://cdn-icons-png.flaticon.com/512/2922/2922506.png", width=50)
-    st.write("*Family Guide Fiona* — Great with kids and family-friendly adventures.")
-with cols[4]:
-    st.image("https://cdn-icons-png.flaticon.com/512/2922/2922510.png", width=50)
-    st.write("*Luxury Guide Leo* — Focuses on premium and comfort travel.")
+    for guide in guides:
+        with st.expander(f"👤 {guide['name']} - {guide['location']}"):
+            st.write(f"*Specialty:* {guide['specialty']}")
+            st.write("📞 Contact: Available on request")
 
-st.markdown("---")
+    st.info("You can expand each guide's profile to know more!")
 
-# -----------------------------
-# 🔹 AI Tour Suggestion Generator
-# -----------------------------
-if st.button("✨ Generate Tour Plan"):
-    if not destination:
-        st.warning("Please enter a destination to continue.")
-    else:
-        with st.spinner("Creating your personalized tour plan..."):
-            prompt = f"""
-            You are {guide_type}, an AI tour guide.
-            Create a personalized travel guide for {destination}.
-            The user is interested in {user_interest if user_interest else "general sightseeing"}.
-            Include:
-            - 3 must-see attractions
-            - 2 local food experiences
-            - 1 cultural or hidden gem recommendation
-            - A short summary paragraph about the destination
-            """
-            
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                result = response.choices[0].message.content
-                st.success(f"Here’s your personalized tour plan for {destination}:")
-                st.markdown(result)
-            except Exception as e:
-                st.error(f"⚠ Error: {str(e)}")
-
-# -----------------------------
-# 🔹 Footer
-# -----------------------------
-st.markdown("---")
-st.caption("Made with ❤ by Bharath Gowda M | T John Institute of Technology")
+st.sidebar.info("Developed by Bharath Gowda M — AI Tour Guide Project 🌍")
