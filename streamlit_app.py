@@ -10,18 +10,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state
-if 'messages' not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I'm your AI tour guide. How can I help you today?"}
-    ]
-if 'destination' not in st.session_state:
-    st.session_state.destination = ''
-if 'language' not in st.session_state:
-    st.session_state.language = 'en'
-if 'api_key_configured' not in st.session_state:
-    st.session_state.api_key_configured = False
-
 # Load offline data
 @st.cache_data
 def load_offline_data():
@@ -32,130 +20,6 @@ def load_offline_data():
         return {"destinations": {}, "phrases": {}}
 
 offline_data = load_offline_data()
-
-# Sidebar
-with st.sidebar:
-    st.title("🌍 AI Tour Guide")
-    
-    # Destination Selection
-    st.subheader("🗺️ Destination")
-    destinations = {
-        "": "Select Destination",
-        "paris": "🇫🇷 Paris, France",
-        "tokyo": "🇯🇵 Tokyo, Japan", 
-        "newyork": "🇺🇸 New York, USA",
-        "london": "🇬🇧 London, UK"
-    }
-    destination = st.selectbox("Choose Destination", 
-                              options=list(destinations.keys()), 
-                              format_func=lambda x: destinations[x])
-    st.session_state.destination = destination
-    
-    # Language Selection
-    st.subheader("🌐 Language")
-    language = st.selectbox("Select Language", 
-                           ["en", "es", "fr", "ja", "zh"],
-                           format_func=lambda x: {
-                               "en": "🇺🇸 English",
-                               "es": "🇪🇸 Spanish", 
-                               "fr": "🇫🇷 French",
-                               "ja": "🇯🇵 Japanese",
-                               "zh": "🇨🇳 Chinese"
-                           }[x])
-    st.session_state.language = language
-    
-    # Quick Actions
-    st.subheader("⚡ Quick Actions")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🗺️ Attractions", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "What are the top attractions here?"})
-        if st.button("🍽️ Food", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "Recommend local food and restaurants"})
-    
-    with col2:
-        if st.button("🚇 Transport", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "How to get around?"})
-        if st.button("🚨 Emergency", use_container_width=True):
-            st.session_state.messages.append({"role": "user", "content": "Emergency contacts and information"})
-
-    # API Key Configuration (Hidden in expander)
-    with st.expander("🔧 Developer Settings"):
-        st.info("Configure API key for AI features")
-        openai_api_key = st.text_input("OpenAI API Key", type="password", 
-                                      help="Get your API key from https://platform.openai.com")
-        if openai_api_key:
-            st.session_state.api_key_configured = True
-            st.success("✅ API key configured!")
-        else:
-            st.session_state.api_key_configured = False
-            st.warning("⚠️ AI features disabled without API key")
-
-# Main Chat Interface
-st.title("🌍 AI Tour Guide")
-st.markdown("Your intelligent travel companion with multi-language support")
-
-# Display chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# Chat input
-if prompt := st.chat_input("Ask about travel destinations, tips, or recommendations..."):
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Display assistant response
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        # Check if API key is available
-        openai_api_key = st.session_state.get('openai_api_key', '')
-        
-        if not openai_api_key:
-            # Use offline mode
-            full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
-            message_placeholder.markdown(full_response)
-        else:
-            try:
-                # Initialize OpenAI client
-                client = OpenAI(api_key=openai_api_key)
-                
-                # Prepare messages for OpenAI
-                messages_for_api = [
-                    {"role": "system", "content": f"You are a friendly, knowledgeable tour guide. Respond in {st.session_state.language} language. Be helpful and provide practical travel advice."}
-                ] + st.session_state.messages
-                
-                # Get AI response
-                stream = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=messages_for_api,
-                    stream=True,
-                    max_tokens=1000,
-                    temperature=0.7
-                )
-                
-                # Stream the response
-                for chunk in stream:
-                    if chunk.choices[0].delta.content is not None:
-                        full_response += chunk.choices[0].delta.content
-                        message_placeholder.markdown(full_response + "▌")
-                
-                message_placeholder.markdown(full_response)
-                
-            except Exception as e:
-                # Fallback to offline response
-                full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
-                message_placeholder.markdown(full_response)
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 def get_offline_response(prompt, destination, language):
     """Get offline response based on user query"""
@@ -276,6 +140,145 @@ def get_general_info_response(dest_info, language):
         "zh": f"**{dest_info['name']}**\n\n{basic_info}\n\n**快速提示:**\n{tips}"
     }
     return responses.get(language, responses["en"])
+
+# Initialize session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hello! I'm your AI tour guide. How can I help you today?"}
+    ]
+if 'destination' not in st.session_state:
+    st.session_state.destination = ''
+if 'language' not in st.session_state:
+    st.session_state.language = 'en'
+if 'api_key_configured' not in st.session_state:
+    st.session_state.api_key_configured = False
+
+# Sidebar
+with st.sidebar:
+    st.title("🌍 AI Tour Guide")
+    
+    # Destination Selection
+    st.subheader("🗺️ Destination")
+    destinations = {
+        "": "Select Destination",
+        "paris": "🇫🇷 Paris, France",
+        "tokyo": "🇯🇵 Tokyo, Japan", 
+        "newyork": "🇺🇸 New York, USA",
+        "london": "🇬🇧 London, UK"
+    }
+    destination = st.selectbox("Choose Destination", 
+                              options=list(destinations.keys()), 
+                              format_func=lambda x: destinations[x])
+    st.session_state.destination = destination
+    
+    # Language Selection
+    st.subheader("🌐 Language")
+    language = st.selectbox("Select Language", 
+                           ["en", "es", "fr", "ja", "zh"],
+                           format_func=lambda x: {
+                               "en": "🇺🇸 English",
+                               "es": "🇪🇸 Spanish", 
+                               "fr": "🇫🇷 French",
+                               "ja": "🇯🇵 Japanese",
+                               "zh": "🇨🇳 Chinese"
+                           }[x])
+    st.session_state.language = language
+    
+    # Quick Actions
+    st.subheader("⚡ Quick Actions")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🗺️ Attractions", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "What are the top attractions here?"})
+        if st.button("🍽️ Food", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "Recommend local food and restaurants"})
+    
+    with col2:
+        if st.button("🚇 Transport", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "How to get around?"})
+        if st.button("🚨 Emergency", use_container_width=True):
+            st.session_state.messages.append({"role": "user", "content": "Emergency contacts and information"})
+
+    # API Key Configuration (Hidden in expander)
+    with st.expander("🔧 Developer Settings"):
+        st.info("Configure API key for AI features")
+        openai_api_key = st.text_input("OpenAI API Key", type="password", 
+                                      help="Get your API key from https://platform.openai.com")
+        if openai_api_key:
+            st.session_state.api_key_configured = True
+            st.session_state.openai_api_key = openai_api_key
+            st.success("✅ API key configured!")
+        else:
+            st.session_state.api_key_configured = False
+            if hasattr(st.session_state, 'openai_api_key'):
+                del st.session_state.openai_api_key
+            st.warning("⚠️ AI features disabled without API key")
+
+# Main Chat Interface
+st.title("🌍 AI Tour Guide")
+st.markdown("Your intelligent travel companion with multi-language support")
+
+# Display chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("Ask about travel destinations, tips, or recommendations..."):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Display assistant response
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
+        
+        # Check if API key is available
+        openai_api_key = st.session_state.get('openai_api_key', '')
+        
+        if not openai_api_key:
+            # Use offline mode
+            full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
+            message_placeholder.markdown(full_response)
+        else:
+            try:
+                # Initialize OpenAI client
+                client = OpenAI(api_key=openai_api_key)
+                
+                # Prepare messages for OpenAI
+                messages_for_api = [
+                    {"role": "system", "content": f"You are a friendly, knowledgeable tour guide. Respond in {st.session_state.language} language. Be helpful and provide practical travel advice."}
+                ] + st.session_state.messages
+                
+                # Get AI response
+                stream = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages_for_api,
+                    stream=True,
+                    max_tokens=1000,
+                    temperature=0.7
+                )
+                
+                # Stream the response
+                for chunk in stream:
+                    if chunk.choices[0].delta.content is not None:
+                        full_response += chunk.choices[0].delta.content
+                        message_placeholder.markdown(full_response + "▌")
+                
+                message_placeholder.markdown(full_response)
+                
+            except Exception as e:
+                # Fallback to offline response
+                full_response = get_offline_response(prompt, st.session_state.destination, st.session_state.language)
+                message_placeholder.markdown(full_response)
+        
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
 # Footer
 st.markdown("---")
