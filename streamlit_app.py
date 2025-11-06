@@ -20,52 +20,52 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
 st.set_page_config(page_title="AI Tour Guide", layout="wide")
-st.title("🌍 AI Tour Guide — Dynamic Conversational Mode")
+st.title("🌎 AI Tour Guide — Online + Offline Mode")
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# --------------------------
-# OFFLINE DATABASE
-# --------------------------
+# -------------------------
+# OFFLINE CITY DATABASE
+# -------------------------
 OFFLINE_CITIES = {
     "bengaluru": {
-        "info": "Bengaluru — the tech capital of India, known for its gardens, cafés, and cool weather.",
+        "info": "Bengaluru — the tech capital of India, known for its parks, cafés, and cool climate.",
         "spots": ["Cubbon Park", "Lalbagh", "Vidhana Soudha", "Church Street"]
     },
     "mysuru": {
-        "info": "Mysuru is famous for royal heritage, yoga, and sandalwood.",
+        "info": "Mysuru is famous for its royal heritage and grand Mysore Palace.",
         "spots": ["Mysore Palace", "Chamundi Hills", "Brindavan Gardens"]
     },
     "mangaluru": {
-        "info": "Mangaluru is a vibrant coastal city with beaches, temples, and seafood.",
+        "info": "Mangaluru — a coastal city known for beaches, temples, and seafood.",
         "spots": ["Panambur Beach", "Kadri Temple", "St. Aloysius Chapel"]
     },
     "coorg": {
-        "info": "Coorg — the Scotland of India, surrounded by coffee plantations and waterfalls.",
+        "info": "Coorg — the Scotland of India, known for its coffee estates and waterfalls.",
         "spots": ["Abbey Falls", "Dubare Elephant Camp", "Raja’s Seat"]
     },
     "udupi": {
-        "info": "Udupi — temple town and birthplace of delicious South Indian cuisine.",
+        "info": "Udupi — a serene temple town and birthplace of South Indian cuisine.",
         "spots": ["Sri Krishna Matha", "Malpe Beach", "St. Mary’s Island"]
     },
     "chikmagalur": {
-        "info": "Chikmagalur is a hill station known for coffee, greenery, and trekking.",
+        "info": "Chikmagalur — a lush hill station known for coffee and trekking trails.",
         "spots": ["Mullayanagiri", "Hebbe Falls", "Baba Budangiri"]
+    },
+    "gokarna": {
+        "info": "Gokarna — peaceful beaches and temples, a perfect escape from the city.",
+        "spots": ["Om Beach", "Kudle Beach", "Mahabaleshwar Temple"]
     },
     "hampi": {
         "info": "Hampi — ancient ruins of the Vijayanagara Empire, a UNESCO World Heritage Site.",
         "spots": ["Virupaksha Temple", "Vittala Temple", "Matanga Hill"]
-    },
-    "gokarna": {
-        "info": "Gokarna — peaceful beaches and ancient temples, perfect for a spiritual escape.",
-        "spots": ["Om Beach", "Kudle Beach", "Mahabaleshwar Temple"]
     }
 }
 
-# --------------------------
+# -------------------------
 # HELPERS
-# --------------------------
+# -------------------------
 def is_online():
     try:
         requests.get("https://www.google.com", timeout=2)
@@ -82,19 +82,20 @@ def detect_city(text):
     return m.group(1).strip() if m else None
 
 def get_offline_info(city):
-    if city in OFFLINE_CITIES:
-        data = OFFLINE_CITIES[city]
-        recs = "\n".join(f"- {p}" for p in data["spots"])
-        return f"{data['info']}\n\nMust Visit:\n{recs}"
-    else:
+    data = OFFLINE_CITIES.get(city)
+    if not data:
         return f"Sorry, I don’t have offline info for {city.title()} yet."
+    info = f"{city.title()}** — {data['info']}\n\n*Must Visit:*"
+    for s in data["spots"]:
+        info += f"\n- {s}"
+    return info
 
 def gpt_guide(city, user_input, lang="English"):
     if not (OPENAI_API_KEY and OpenAI):
         return None
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
-        prompt = f"You are a dynamic, friendly tour guide. User said: '{user_input}'. Respond naturally about {city}, include 3 relevant tips or attractions, and ask one follow-up question. Use emojis. Reply in {lang}."
+        prompt = f"You are a dynamic travel guide. User asked: '{user_input}'. Respond about {city}, give 3-4 recommendations, and ask a question back."
         r = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
@@ -141,11 +142,14 @@ def geocode(city):
         return None, None
     return None, None
 
-# --------------------------
+# -------------------------
 # MAIN APP
-# --------------------------
+# -------------------------
 online = is_online()
-st.sidebar.success("🟢 Online" if online else "🔴 Offline")
+status = "🟢 Online Mode" if online else "🔴 Offline Mode"
+st.sidebar.info(f"*Status:* {status}")
+st.sidebar.markdown("Offline data available for Karnataka cities.")
+
 lang = st.sidebar.selectbox("Voice language", ["en", "hi", "kn"], index=0)
 
 st.markdown("#### 💬 Talk to your AI Tour Guide below!")
@@ -155,7 +159,7 @@ if "chat" not in st.session_state:
 if "last_city" not in st.session_state:
     st.session_state.last_city = None
 
-user_input = st.chat_input("Ask or say something about a place...")
+user_input = st.chat_input("Ask about any place...")
 
 if user_input:
     st.session_state.chat.append({"role": "user", "content": user_input})
@@ -165,15 +169,15 @@ for message in st.session_state.chat:
         st.write(message["content"])
 
 if user_input:
-    greeting_words = ["hi", "hello", "hey", "namaste", "yo", "good morning", "good evening"]
+    greeting_words = ["hi", "hello", "hey", "namaste", "yo"]
     city = detect_city(user_input)
     ai_reply = ""
 
     with st.chat_message("assistant"):
         if any(word in user_input.lower() for word in greeting_words):
             ai_reply = (
-                "👋 Hey there, traveler! I’m your AI Tour Guide. "
-                "Tell me a city you’d like to explore — like Mysuru, Coorg, or Gokarna!"
+                "👋 Hey there, traveler! I’m your AI Tour Guide.\n"
+                "You can ask things like ‘Show me places in Coorg’ or ‘What to see in Mysuru’."
             )
 
         elif city or st.session_state.last_city:
@@ -187,8 +191,7 @@ if user_input:
 
         else:
             ai_reply = (
-                "I didn’t quite get that 🤔. Try saying something like "
-                "‘Show me places in Coorg’ or ‘Things to do in Mysuru’."
+                "🤔 I didn’t quite get that. Try saying ‘Tell me about Mangaluru’ or ‘Best places in Coorg’."
             )
 
         st.markdown(ai_reply)
@@ -196,20 +199,24 @@ if user_input:
         st.session_state.chat.append({"role": "assistant", "content": ai_reply})
 
         if st.session_state.last_city:
-            imgs = get_unsplash(st.session_state.last_city) if online else []
-            if imgs:
-                st.markdown("### 📸 Images")
-                cols = st.columns(len(imgs))
-                for i, url in enumerate(imgs):
-                    with cols[i % len(cols)]:
-                        st.image(url, width="stretch")
+            city = st.session_state.last_city
+            if online:
+                imgs = get_unsplash(city)
+                if imgs:
+                    st.markdown("### 📸 Images")
+                    cols = st.columns(len(imgs))
+                    for i, url in enumerate(imgs):
+                        with cols[i % len(cols)]:
+                            st.image(url, width="stretch")
 
-            lat, lon = geocode(st.session_state.last_city)
+            lat, lon = geocode(city)
             if lat and lon and FOLIUM_OK:
                 st.markdown("### 🗺 Map")
                 m = folium.Map(location=[lat, lon], zoom_start=12)
-                folium.Marker([lat, lon], tooltip=st.session_state.last_city.title()).add_to(m)
+                folium.Marker([lat, lon], tooltip=city.title()).add_to(m)
                 st_folium(m, width=700, height=400)
+            elif not FOLIUM_OK:
+                st.warning("🗺 Map module unavailable (folium not installed).")
 
 st.markdown("---")
-st.caption("AI Tour Guide — Interactive, Context-Aware, and Offline Ready 🌎")
+st.caption(f"AI Tour Guide — {'Offline Ready' if not online else 'Online & Smart'} 🌎")
