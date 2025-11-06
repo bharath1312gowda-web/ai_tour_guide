@@ -79,7 +79,7 @@ def detect_city(text):
         if c in text:
             return c
     m = re.search(r"in\s+([a-z\s]+)", text)
-    return m.group(1).strip() if m else text.strip().split()[0]
+    return m.group(1).strip() if m else None
 
 def get_offline_info(city):
     if city in OFFLINE_CITIES:
@@ -94,7 +94,7 @@ def gpt_guide(city, user_input, lang="English"):
         return None
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
-        prompt = f"You are a friendly and professional tour guide. User said: '{user_input}'. Respond dynamically about {city}, include 3 suggestions and ask a follow-up question. Use emojis and a friendly tone. Reply in {lang}."
+        prompt = f"You are a dynamic, friendly tour guide. User said: '{user_input}'. Respond naturally about {city}, include 3 relevant tips or attractions, and ask one follow-up question. Use emojis. Reply in {lang}."
         r = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
@@ -111,7 +111,7 @@ def speak_text(text, lang="en"):
         tts.save(path)
         st.audio(open(path, "rb").read())
     except:
-        st.warning("Voice playback unavailable.")
+        pass
 
 def get_unsplash(city):
     if not UNSPLASH_ACCESS_KEY:
@@ -150,9 +150,10 @@ lang = st.sidebar.selectbox("Voice language", ["en", "hi", "kn"], index=0)
 
 st.markdown("#### 💬 Talk to your AI Tour Guide below!")
 
-# Initialize chat history
 if "chat" not in st.session_state:
     st.session_state.chat = []
+if "last_city" not in st.session_state:
+    st.session_state.last_city = None
 
 user_input = st.chat_input("Ask or say something about a place...")
 
@@ -164,30 +165,51 @@ for message in st.session_state.chat:
         st.write(message["content"])
 
 if user_input:
+    greeting_words = ["hi", "hello", "hey", "namaste", "yo", "good morning", "good evening"]
     city = detect_city(user_input)
+    ai_reply = ""
+
     with st.chat_message("assistant"):
-        if online:
-            ai_reply = gpt_guide(city, user_input) or get_offline_info(city)
+        if any(word in user_input.lower() for word in greeting_words):
+            ai_reply = (
+                "👋 Hey there, traveler! I’m your AI Tour Guide. "
+                "Tell me a city you’d like to explore — like Mysuru, Coorg, or Gokarna!"
+            )
+
+        elif city or st.session_state.last_city:
+            current_city = city or st.session_state.last_city
+            st.session_state.last_city = current_city
+
+            if online:
+                ai_reply = gpt_guide(current_city, user_input) or get_offline_info(current_city)
+            else:
+                ai_reply = get_offline_info(current_city)
+
         else:
-            ai_reply = get_offline_info(city)
+            ai_reply = (
+                "I didn’t quite get that 🤔. Try saying something like "
+                "‘Show me places in Coorg’ or ‘Things to do in Mysuru’."
+            )
+
         st.markdown(ai_reply)
         speak_text(ai_reply, lang)
         st.session_state.chat.append({"role": "assistant", "content": ai_reply})
 
-        imgs = get_unsplash(city) if online else []
-        if imgs:
-            st.markdown("### 📸 Images")
-            cols = st.columns(len(imgs))
-            for i, url in enumerate(imgs):
-                with cols[i % len(cols)]:
-                    st.image(url, width="stretch")
+        if st.session_state.last_city:
+            imgs = get_unsplash(st.session_state.last_city) if online else []
+            if imgs:
+                st.markdown("### 📸 Images")
+                cols = st.columns(len(imgs))
+                for i, url in enumerate(imgs):
+                    with cols[i % len(cols)]:
+                        st.image(url, width="stretch")
 
-        lat, lon = geocode(city)
-        if lat and lon and FOLIUM_OK:
-            st.markdown("### 🗺 Map")
-            m = folium.Map(location=[lat, lon], zoom_start=12)
-            folium.Marker([lat, lon], tooltip=city.title()).add_to(m)
-            st_folium(m, width=700, height=400)
+            lat, lon = geocode(st.session_state.last_city)
+            if lat and lon and FOLIUM_OK:
+                st.markdown("### 🗺 Map")
+                m = folium.Map(location=[lat, lon], zoom_start=12)
+                folium.Marker([lat, lon], tooltip=st.session_state.last_city.title()).add_to(m)
+                st_folium(m, width=700, height=400)
 
 st.markdown("---")
-st.caption("AI Tour Guide — Interactive, Dynamic, and Offline Ready 🌎")
+st.caption("AI Tour Guide — Interactive, Context-Aware, and Offline Ready 🌎")
