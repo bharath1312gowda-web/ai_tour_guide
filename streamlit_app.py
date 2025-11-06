@@ -1,4 +1,3 @@
-# streamlit_app.py
 import os
 import re
 import json
@@ -10,271 +9,233 @@ from PIL import Image, ImageDraw, ImageFont
 from gtts import gTTS
 from dotenv import load_dotenv
 
-# Optional OpenAI / folium imports (graceful fallback)
 try:
     from openai import OpenAI
-except Exception:
+except:
     OpenAI = None
 
 try:
     import folium
     from streamlit_folium import st_folium
     FOLIUM_OK = True
-except Exception:
+except:
     FOLIUM_OK = False
 
+# Load .env
 load_dotenv()
-
-# -----------------------
-# CONFIG
-# -----------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
 
+# Setup directories
 DATA_DIR = "data"
-CITIES_DIR = os.path.join(DATA_DIR, "cities")  # saved offline city folders
+CITIES_DIR = os.path.join(DATA_DIR, "cities")
 os.makedirs(CITIES_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
 
+# Streamlit config
 st.set_page_config(page_title="AI Tour Guide", layout="wide")
-st.title("🌍 AI Tour Guide — Offline Verification Build")
+st.title("🌎 AI Tour Guide — Online + Offline")
 
-# Offline sample data (used if GPT / Unsplash not available)
-OFFLINE_CITIES = {
-    "bengaluru": {"info": "Bengaluru — tech hub with parks and cafés.", "spots": ["Cubbon Park", "Lalbagh"]},
-    "mysuru": {"info": "Mysuru — royal city.", "spots": ["Mysore Palace", "Chamundi Hills"]},
-    "coorg": {"info": "Coorg — coffee and hills.", "spots": ["Abbey Falls", "Raja's Seat"]},
-}
+# --------------------------
+# HELPER FUNCTIONS
+# --------------------------
+def safe_key(s): return "".join(c for c in s.lower().strip().replace(" ", "") if c.isalnum() or c in "-")
 
-# -----------------------
-# UTILITIES
-# -----------------------
-def safe_key(s: str) -> str:
-    return "".join(c for c in s.lower().strip().replace(" ", "") if (c.isalnum() or c in "-"))
-
-def make_dir_for_city(city_name: str) -> str:
-    key = safe_key(city_name)
-    folder = os.path.join(CITIES_DIR, key)
-    os.makedirs(folder, exist_ok=True)
-    return folder
-
-def make_placeholder_map_image(city: str, lat=None, lon=None, dest_path=None, w=900, h=480):
-    img = Image.new("RGB", (w, h), (245,245,245))
-    draw = ImageDraw.Draw(img)
+def is_online():
     try:
-        font = ImageFont.truetype("DejaVuSans.ttf", 20)
-    except Exception:
-        font = None
-    title = f"{city.title()}"
-    coord = f"{lat:.5f}, {lon:.5f}" if (lat is not None and lon is not None) else ""
-    draw.text((20, 20), title, fill=(30,30,30), font=font)
-    if coord:
-        draw.text((20, 60), coord, fill=(80,80,80), font=font)
-    # light grid
-    for x in range(20, w-20, 60):
-        draw.line(((x, 120), (x, h-20)), fill=(230,230,230))
-    for y in range(120, h-20, 60):
-        draw.line(((20, y), (w-20, y)), fill=(230,230,230))
-    if dest_path:
-        try:
-            img.save(dest_path)
-        except Exception:
-            pass
+        requests.get("https://www.google.com", timeout=2)
+        return True
+    except:
+        return False
+
+def make_placeholder_map_image(city, lat=None, lon=None, dest_path=None):
+    img = Image.new("RGB", (800, 400), (245,245,245))
+    d = ImageDraw.Draw(img)
+    d.text((20, 20), f"{city.title()}", fill=(0,0,0))
+    if lat and lon:
+        d.text((20, 60), f"Lat: {lat:.3f}, Lon: {lon:.3f}", fill=(80,80,80))
+    if dest_path: img.save(dest_path)
     return img
 
-def geocode_city(city: str):
+def geocode_city(city):
     try:
         r = requests.get("https://nominatim.openstreetmap.org/search",
-                         params={"q": city, "format":"json", "limit":1},
-                         headers={"User-Agent":"ai-tour-guide"}, timeout=8)
-        r.raise_for_status()
+                         params={"q": city, "format": "json", "limit": 1},
+                         headers={"User-Agent": "ai-tour-guide"}, timeout=8)
         data = r.json()
         if data:
             return float(data[0]["lat"]), float(data[0]["lon"])
-    except Exception:
+    except:
         return None, None
     return None, None
 
-def fetch_unsplash_urls(city: str, n=3):
-    if not UNSPLASH_ACCESS_KEY:
-        return []
+def fetch_unsplash_urls(city, n=3):
+    if not UNSPLASH_ACCESS_KEY: return []
     try:
         r = requests.get("https://api.unsplash.com/search/photos",
                          params={"query": city, "per_page": n, "client_id": UNSPLASH_ACCESS_KEY}, timeout=8)
-        r.raise_for_status()
-        results = r.json().get("results", [])[:n]
-        return [it["urls"]["regular"] for it in results if "urls" in it]
-    except Exception:
+        results = r.json().get("results", [])
+        return [p["urls"]["regular"] for p in results[:n]]
+    except:
         return []
 
-def download_image(url: str, dest: str) -> bool:
+def gpt_reply(city, user_text):
+    if not OPENAI_API_KEY or not OpenAI: return None
     try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        img = Image.open(BytesIO(r.content)).convert("RGB")
-        img.save(dest, format="JPEG", quality=85)
-        return True
-    except Exception:
-        return False
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        prompt = f"You are a travel guide. The user asked: '{user_text}'. Talk about {city} — attractions, culture, and food. Be friendly and brief."
+        r = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300
+        )
+        return r.choices[0].message.content.strip()
+    except:
+        return None
 
-def speak(text: str, lang: str = "en"):
-    if not text:
-        return
+def speak(text, lang="en"):
     try:
         tts = gTTS(text=text, lang=lang)
-        tmp = os.path.join(DATA_DIR, f"tts_{int(time.time())}.mp3")
-        tts.save(tmp)
-        st.audio(open(tmp, "rb").read())
-    except Exception:
-        pass
+        p = os.path.join(DATA_DIR, f"tts_{int(time.time())}.mp3")
+        tts.save(p)
+        st.audio(open(p, "rb").read())
+    except: pass
 
-# -----------------------
-# UI: Sidebar - Offline management + debug
-# -----------------------
-online = True
-try:
-    requests.get("https://www.google.com", timeout=2.0)
-except Exception:
-    online = False
+# --------------------------
+# OFFLINE CITY DB
+# --------------------------
+OFFLINE_CITIES = {
+    "bengaluru": {"info": "Bengaluru — tech capital, great weather, and gardens.", "spots": ["Cubbon Park", "Lalbagh"]},
+    "mysuru": {"info": "Mysuru — royal heritage city.", "spots": ["Mysore Palace", "Brindavan Gardens"]},
+    "coorg": {"info": "Coorg — coffee plantations & misty hills.", "spots": ["Abbey Falls", "Dubare Camp"]},
+}
 
-st.sidebar.markdown(f"*Network:* {'🟢 Online' if online else '🔴 Offline'}")
-st.sidebar.markdown("Save a city for offline + inspect saved files below.")
+# --------------------------
+# SIDEBAR
+# --------------------------
+online = is_online()
+st.sidebar.markdown(f"*Status:* {'🟢 Online' if online else '🔴 Offline'}")
 
-# input to download city
-dl_city = st.sidebar.text_input("City to download for offline", value="")
-if st.sidebar.button("Download for offline"):
-    if not dl_city.strip():
-        st.sidebar.error("Enter a city name (e.g., Mysuru)")
+voice_lang = st.sidebar.selectbox("Voice language", ["en", "hi", "kn"], index=0)
+
+# City downloader
+st.sidebar.markdown("---")
+city_to_download = st.sidebar.text_input("Download city for offline:")
+if st.sidebar.button("Download"):
+    if not city_to_download.strip():
+        st.sidebar.error("Enter a city name first.")
     else:
-        folder = make_dir_for_city(dl_city)
-        # save meta.json with simple info
-        meta = {
-            "city": dl_city,
-            "saved_at": time.time(),
-            "note": "Saved by Download for offline button"
-        }
-        # prefer built-in offline info if exists
-        key = dl_city.lower()
-        if key in OFFLINE_CITIES:
-            meta["info"] = OFFLINE_CITIES[key]["info"]
-            meta["spots"] = OFFLINE_CITIES[key]["spots"]
-        else:
-            meta["info"] = f"{dl_city.title()} — basic offline summary."
+        key = safe_key(city_to_download)
+        folder = os.path.join(CITIES_DIR, key)
+        os.makedirs(folder, exist_ok=True)
+        meta = {"city": city_to_download, "info": OFFLINE_CITIES.get(key, {}).get("info", f"{city_to_download.title()} info."),
+                "spots": OFFLINE_CITIES.get(key, {}).get("spots", []), "saved_at": time.time()}
+        json.dump(meta, open(os.path.join(folder, "meta.json"), "w"), indent=2)
 
-        with open(os.path.join(folder, "meta.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
-
-        # download images (if Online + Unsplash key)
+        # Download images
         saved = 0
         if online and UNSPLASH_ACCESS_KEY:
-            urls = fetch_unsplash_urls(dl_city, n=4)
+            urls = fetch_unsplash_urls(city_to_download)
             for i, url in enumerate(urls, start=1):
-                dest = os.path.join(folder, f"img_{i}.jpg")
-                if download_image(url, dest):
+                try:
+                    img = Image.open(BytesIO(requests.get(url).content))
+                    img.save(os.path.join(folder, f"img_{i}.jpg"))
                     saved += 1
+                except:
+                    pass
 
-        # geocode and create a saved map image (always create)
+        # Save map
         lat, lon = (None, None)
         if online:
-            lat, lon = geocode_city(dl_city)
-        map_path = os.path.join(folder, "map.png")
-        make_placeholder_map_image(dl_city, lat or 0.0, lon or 0.0, dest_path=map_path)
+            lat, lon = geocode_city(city_to_download)
+        make_placeholder_map_image(city_to_download, lat, lon, os.path.join(folder, "map.png"))
 
-        st.sidebar.success(f"Saved '{dl_city}' → folder: {folder} (images: {saved}, map: map.png)")
+        st.sidebar.success(f"Saved {city_to_download} offline with {saved} images.")
 
-# show list of saved city folders with debug info
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Saved offline cities (folders)")
-folders = sorted([d for d in os.listdir(CITIES_DIR) if os.path.isdir(os.path.join(CITIES_DIR, d))])
+# List saved cities
+st.sidebar.markdown("### Saved offline cities")
+folders = [f for f in os.listdir(CITIES_DIR) if os.path.isdir(os.path.join(CITIES_DIR, f))]
 if not folders:
-    st.sidebar.info("No saved cities yet. Use Download for offline.")
+    st.sidebar.info("No cities saved yet.")
 else:
     for f in folders:
-        folder_path = os.path.join(CITIES_DIR, f)
-        st.sidebar.markdown(f"- *{f}*")
-        # list files inside
-        files = sorted(os.listdir(folder_path))
-        if files:
-            st.sidebar.write(", ".join(files))
+        st.sidebar.write("📁", f)
+
+# --------------------------
+# MAIN CHAT
+# --------------------------
+if "chat" not in st.session_state: st.session_state.chat = []
+
+for msg in st.session_state.chat:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+user_input = st.chat_input("Ask about any city...")
+
+if user_input:
+    st.session_state.chat.append({"role": "user", "content": user_input})
+    with st.chat_message("user"): st.markdown(user_input)
+
+    reply = ""
+    city = None
+    for c in list(OFFLINE_CITIES.keys()) + folders:
+        if c in user_input.lower():
+            city = c
+            break
+
+    if city:
+        folder = os.path.join(CITIES_DIR, safe_key(city))
+        if online:
+            reply = gpt_reply(city, user_input) or f"{city.title()} — info unavailable."
         else:
-            st.sidebar.write("empty folder")
-
-# -----------------------
-# Main UI: chat-like input + show saved data
-# -----------------------
-st.markdown("## Test saved city display")
-st.markdown("Type a city name that you've downloaded (or use a built-in sample like 'Mysuru'/'Bengaluru').")
-
-city_query = st.text_input("Show offline data for city (type exact or partial name):", value="")
-
-if city_query:
-    # find best matching saved folder first
-    key = safe_key(city_query)
-    folder = os.path.join(CITIES_DIR, key)
-    found_folder = None
-    if os.path.isdir(folder):
-        found_folder = folder
+            meta_path = os.path.join(folder, "meta.json")
+            if os.path.exists(meta_path):
+                meta = json.load(open(meta_path))
+                reply = meta["info"]
+            else:
+                reply = OFFLINE_CITIES.get(city, {}).get("info", f"{city.title()} info unavailable offline.")
     else:
-        # attempt fuzzy search among saved folders and built-in offline names
-        for f in folders:
-            if key in f:
-                found_folder = os.path.join(CITIES_DIR, f)
-                break
-        # if still not found, check built-in offline data
-        if not found_folder and city_query.lower() in OFFLINE_CITIES:
-            st.info(f"City found in built-in offline DB but not saved to disk. Use sidebar Download for offline to save it.")
-            found_folder = None
+        reply = "Tell me a city name (e.g., Mysuru, Coorg)."
 
-    if found_folder:
-        st.success(f"Showing saved offline data: {found_folder}")
-        # show meta.json
-        meta_path = os.path.join(found_folder, "meta.json")
-        if os.path.exists(meta_path):
-            try:
-                meta = json.load(open(meta_path, "r", encoding="utf-8"))
-                st.markdown("*meta.json*")
-                st.json(meta)
-            except Exception as e:
-                st.warning(f"Could not read meta.json: {e}")
-        else:
-            st.info("No meta.json found in folder.")
+    with st.chat_message("assistant"):
+        st.markdown(reply)
+        speak(reply, voice_lang)
 
-        # show images (exclude map.png)
-        imgs = sorted([os.path.join(found_folder, fn) for fn in os.listdir(found_folder)
-                       if fn.lower().endswith((".jpg", ".jpeg", ".png")) and fn.lower() != "map.png"])
+    st.session_state.chat.append({"role": "assistant", "content": reply})
+
+    # Show images and map
+    if city:
+        st.markdown("---")
+        st.subheader(f"📸 {city.title()} Highlights")
+        imgs = []
+        folder = os.path.join(CITIES_DIR, safe_key(city))
+        if os.path.isdir(folder):
+            imgs = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".jpg")]
         if imgs:
-            st.markdown("### Saved images")
             cols = st.columns(min(3, len(imgs)))
-            for i, p in enumerate(imgs):
-                try:
-                    with cols[i % len(cols)]:
-                        st.image(Image.open(p), width='stretch')
-                except Exception as e:
-                    st.write("Could not open:", p, "-", e)
+            for i, path in enumerate(imgs):
+                with cols[i % len(cols)]:
+                    st.image(path, width='stretch')
+        elif online:
+            urls = fetch_unsplash_urls(city)
+            cols = st.columns(min(3, len(urls)))
+            for i, url in enumerate(urls):
+                with cols[i % len(cols)]:
+                    st.image(url, width='stretch')
         else:
-            st.info("No saved images in folder. (Unsplash images download requires UNSPLASH_ACCESS_KEY and being online when you clicked Download.)")
+            st.info("No images available offline for this city.")
 
-        # show saved map.png
-        map_path = os.path.join(found_folder, "map.png")
-        if os.path.exists(map_path):
-            st.markdown("### Saved map (map.png)")
-            try:
-                st.image(Image.open(map_path), width='stretch')
-            except Exception as e:
-                st.warning(f"Map exists but could not be displayed: {e}")
+        st.subheader("🗺 Map")
+        lat, lon = geocode_city(city) if online else (None, None)
+        if online and lat and lon and FOLIUM_OK:
+            m = folium.Map(location=[lat, lon], zoom_start=12)
+            folium.Marker([lat, lon], tooltip=city.title()).add_to(m)
+            st_folium(m, width=700, height=400)
         else:
-            st.info("No map.png in folder. The download step always creates a placeholder map; if missing, please re-download the city.")
-    else:
-        # show built-in offline info if available
-        if city_query.lower() in OFFLINE_CITIES:
-            d = OFFLINE_CITIES[city_query.lower()]
-            st.markdown(f"*Built-in offline info for {city_query.title()}*")
-            st.write(d["info"])
-            st.markdown("*Spots:*")
-            for s in d["spots"]:
-                st.write("-", s)
-        else:
-            st.error("City not saved offline and not found in built-in offline DB. Use the sidebar to Download for offline while online.")
+            map_path = os.path.join(folder, "map.png")
+            if os.path.exists(map_path):
+                st.image(map_path, width='stretch')
+            else:
+                st.info("No saved map for this city.")
 
 st.markdown("---")
-st.caption("This debug view shows exactly which files are saved for each downloaded city. If you still can't see your images or map, check the 'Saved offline cities' list on the left for the folder name and contents.")
+st.caption("AI Tour Guide — Switches automatically between online (AI + live maps) and offline (saved data).")
