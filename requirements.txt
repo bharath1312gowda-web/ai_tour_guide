@@ -1,8 +1,8 @@
 streamlit
-python-dotenv
-requests
-Pillow
-gTTS
-openai>=1.12.0
+openai
 folium
 streamlit-folium
+gTTS
+requests
+python-dotenv
+Pillow
